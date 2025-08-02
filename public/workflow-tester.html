@@ -20,7 +20,7 @@
         }
 
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
         }
 
@@ -183,7 +183,7 @@
         }
 
         .execution-list {
-            max-height: 300px;
+            max-height: 400px;
             overflow-y: auto;
             margin-top: 15px;
         }
@@ -193,15 +193,33 @@
             padding: 10px;
             margin-bottom: 8px;
             border-radius: 6px;
+            font-size: 0.9em;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
+        }
+
+        .execution-item:hover {
+            background: #333;
+            border-color: #ff6b6b;
+        }
+
+        .execution-item.active {
+            border-color: #2196f3;
+            background: #1e3a5f;
+        }
+
+        .execution-item .header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            font-size: 0.9em;
+            margin-bottom: 5px;
         }
 
         .execution-item .id {
             color: #64b5f6;
             font-family: monospace;
+            font-size: 0.8em;
         }
 
         .execution-item .status-badge {
@@ -221,14 +239,26 @@
             color: white;
         }
 
-        .status-badge.active {
+        .status-badge.running {
             background: #2196f3;
+            color: white;
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-badge.pending {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .status-badge.cancelled {
+            background: #9e9e9e;
             color: white;
         }
 
-        .status-badge.waiting {
-            background: #ffc107;
-            color: #333;
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.6; }
+            100% { opacity: 1; }
         }
 
         .json-viewer {
@@ -314,6 +344,117 @@
         .api-endpoint .url {
             color: #64b5f6;
         }
+
+        .workflow-monitor {
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+
+        .monitor-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .monitor-header h3 {
+            color: #ffd93d;
+            margin: 0;
+        }
+
+        .auto-refresh {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .auto-refresh input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
+        .step-indicator {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .step {
+            background: #2a2a2a;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            border: 2px solid #444;
+            transition: all 0.3s ease;
+        }
+
+        .step.active {
+            background: #1e3a5f;
+            border-color: #2196f3;
+            color: #64b5f6;
+            animation: pulse 1.5s infinite;
+        }
+
+        .step.completed {
+            background: #1b5e20;
+            border-color: #4caf50;
+            color: #81c784;
+        }
+
+        .step.failed {
+            background: #b71c1c;
+            border-color: #f44336;
+            color: #ef5350;
+        }
+
+        .execution-details {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #333;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+        }
+
+        .detail-label {
+            color: #999;
+        }
+
+        .detail-value {
+            color: #e0e0e0;
+            font-family: monospace;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: #333;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff6b6b, #ffd93d);
+            transition: width 0.3s ease;
+            animation: shimmer 2s infinite;
+        }
+
+        @keyframes shimmer {
+            0% { opacity: 0.8; }
+            50% { opacity: 1; }
+            100% { opacity: 0.8; }
+        }
     </style>
 </head>
 <body>
@@ -322,7 +463,8 @@
         
         <div class="tabs">
             <button class="tab active" onclick="showTab('workflows')">Workflows</button>
-            <button class="tab" onclick="showTab('executions')">Ejecuciones</button>
+            <button class="tab" onclick="showTab('monitor')">Monitor en Tiempo Real</button>
+            <button class="tab" onclick="showTab('history')">Historial</button>
             <button class="tab" onclick="showTab('api')">API Info</button>
         </div>
 
@@ -349,11 +491,7 @@
                         <label>Datos de entrada (JSON):</label>
                         <textarea id="workflow-data" placeholder='{"nombre": "Test", "email": "test@example.com"}'>{
   "test": true,
-  "timestamp": "2024-01-01",
-  "user": {
-    "name": "Test User",
-    "email": "test@example.com"
-  }
+  "maxIterations": 5
 }</textarea>
                     </div>
                     
@@ -366,19 +504,49 @@
             </div>
         </div>
 
-        <div id="executions-tab" class="tab-content" style="display: none;">
+        <div id="monitor-tab" class="tab-content" style="display: none;">
             <div class="card">
-                <h2>📊 Historial de Ejecuciones</h2>
+                <h2>📊 Monitor de Workflows en Tiempo Real</h2>
+                
+                <div class="workflow-monitor">
+                    <div class="monitor-header">
+                        <h3>Ejecuciones Activas</h3>
+                        <div class="auto-refresh">
+                            <label>
+                                <input type="checkbox" id="auto-refresh" checked onchange="toggleAutoRefresh()">
+                                Auto-refresh (2s)
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div id="active-executions">
+                        <div class="status info">No hay ejecuciones activas</div>
+                    </div>
+                </div>
+
+                <div class="workflow-monitor" style="margin-top: 20px;">
+                    <h3 style="color: #ffd93d; margin-bottom: 15px;">Detalles de Ejecución Seleccionada</h3>
+                    <div id="execution-details">
+                        <div class="status info">Selecciona una ejecución para ver detalles</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="history-tab" class="tab-content" style="display: none;">
+            <div class="card">
+                <h2>📜 Historial Completo de Ejecuciones</h2>
+                <button onclick="loadExecutionHistory()">🔄 Actualizar Historial</button>
                 <div class="execution-list" id="execution-history">
-                    <div class="status info">No hay ejecuciones todavía</div>
+                    <div class="status info">Cargando historial...</div>
                 </div>
             </div>
 
             <div class="card">
                 <h2>🔍 Detalles de Ejecución</h2>
                 <div class="input-group">
-                    <label>ID de Instancia:</label>
-                    <textarea id="instance-id" placeholder="Pega aquí el ID de la instancia" rows="2"></textarea>
+                    <label>ID de Ejecución:</label>
+                    <textarea id="instance-id" placeholder="Pega aquí el ID de la ejecución" rows="2"></textarea>
                 </div>
                 <button onclick="checkStatus()">🔍 Consultar Estado</button>
                 <div id="status-result"></div>
@@ -400,6 +568,12 @@
                     <span class="method">GET</span>
                     <span class="url">/workflows</span>
                     - Lista todos los workflows
+                </div>
+
+                <div class="api-endpoint">
+                    <span class="method">GET</span>
+                    <span class="url">/workflows/executions</span>
+                    - Historial de ejecuciones
                 </div>
 
                 <div class="api-endpoint">
@@ -431,12 +605,6 @@
                     <span class="url">/workflows/instances/:id</span>
                     - Termina un workflow
                 </div>
-
-                <div class="api-endpoint">
-                    <span class="method">POST</span>
-                    <span class="url">/workflows/:id/test</span>
-                    - Prueba un workflow sin usar colas
-                </div>
             </div>
 
             <div class="card">
@@ -450,11 +618,16 @@
     <script>
         const API_BASE = 'http://localhost:3000/api/v1';
         let selectedWorkflow = null;
-        let executionHistory = [];
+        let activeExecutions = new Map();
+        let selectedExecutionId = null;
+        let autoRefreshInterval = null;
+        let isAutoRefreshEnabled = true;
 
         // Cargar workflows al inicio
         window.onload = () => {
             loadWorkflows();
+            loadExecutionHistory();
+            startAutoRefresh();
         };
 
         function showTab(tabName) {
@@ -473,6 +646,42 @@
             
             // Activar el botón correspondiente
             event.target.classList.add('active');
+            
+            // Si es el tab de monitor, actualizar inmediatamente
+            if (tabName === 'monitor') {
+                updateActiveExecutions();
+            }
+        }
+
+        function toggleAutoRefresh() {
+            isAutoRefreshEnabled = document.getElementById('auto-refresh').checked;
+            if (isAutoRefreshEnabled) {
+                startAutoRefresh();
+            } else {
+                stopAutoRefresh();
+            }
+        }
+
+        function startAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+            
+            if (isAutoRefreshEnabled) {
+                autoRefreshInterval = setInterval(() => {
+                    updateActiveExecutions();
+                    if (selectedExecutionId) {
+                        updateExecutionDetails(selectedExecutionId);
+                    }
+                }, 2000); // Actualizar cada 2 segundos
+            }
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
         }
 
         async function loadWorkflows() {
@@ -523,7 +732,17 @@
             
             // Sugerir datos de ejemplo según el workflow
             const dataTextarea = document.getElementById('workflow-data');
-            if (workflow.id === 'sample-workflow') {
+            if (workflow.id === 'loop-workflow') {
+                dataTextarea.value = JSON.stringify({
+                    maxIterations: 5,
+                    message: "Test de loop workflow"
+                }, null, 2);
+            } else if (workflow.id === 'conditional-loop') {
+                dataTextarea.value = JSON.stringify({
+                    counter: 0,
+                    testMode: true
+                }, null, 2);
+            } else if (workflow.id === 'sample-workflow') {
                 dataTextarea.value = JSON.stringify({
                     test: true,
                     message: "Prueba de workflow",
@@ -574,23 +793,14 @@
                         <div class="json-viewer">${JSON.stringify(result, null, 2)}</div>
                     `;
                     
-                    // Agregar a historial
-                    executionHistory.unshift({
-                        id: result.instanceId,
-                        workflowId: selectedWorkflow.id,
-                        workflowName: selectedWorkflow.name,
-                        timestamp: new Date(),
-                        status: 'active'
-                    });
-                    updateExecutionHistory();
+                    // Cambiar al tab de monitor para ver el progreso
+                    showTab('monitor');
+                    selectedExecutionId = result.instanceId;
                     
-                    // Auto-check status después de 2 segundos
-                    if (result.instanceId) {
-                        setTimeout(() => {
-                            document.getElementById('instance-id').value = result.instanceId;
-                            checkStatus();
-                        }, 2000);
-                    }
+                    // Actualizar inmediatamente
+                    setTimeout(() => {
+                        updateActiveExecutions();
+                    }, 500);
                 } else {
                     resultEl.innerHTML = `
                         <div class="status error">
@@ -611,6 +821,217 @@
             }
         }
 
+        async function updateActiveExecutions() {
+            const container = document.getElementById('active-executions');
+            
+            try {
+                const response = await fetch(`${API_BASE}/workflows/executions`);
+                const executions = await response.json();
+                
+                // Filtrar solo las ejecuciones activas
+                const activeExecs = executions.filter(e => 
+                    e.status === 'running' || e.status === 'pending' || e.status === 'active'
+                );
+                
+                if (activeExecs.length === 0) {
+                    container.innerHTML = '<div class="status info">No hay ejecuciones activas</div>';
+                    return;
+                }
+                
+                container.innerHTML = activeExecs.map(exec => {
+                    const isSelected = exec.id === selectedExecutionId;
+                    return `
+                        <div class="execution-item ${isSelected ? 'active' : ''}" onclick="selectExecution('${exec.id}')">
+                            <div class="header">
+                                <div>
+                                    <strong>${getWorkflowName(exec.workflowId)}</strong>
+                                    <div class="id">${exec.id}</div>
+                                </div>
+                                <span class="status-badge ${exec.status}">${exec.status}</span>
+                            </div>
+                            ${exec.data?.currentStep ? `
+                                <div class="step-indicator">
+                                    <span class="step active">📍 ${exec.data.currentStep}</span>
+                                </div>
+                            ` : ''}
+                            ${exec.data?.iteration ? `
+                                <div class="detail-row">
+                                    <span class="detail-label">Iteración:</span>
+                                    <span class="detail-value">#${exec.data.iteration}</span>
+                                </div>
+                            ` : ''}
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${getProgress(exec)}%"></div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                
+                // Si hay una ejecución seleccionada, actualizar sus detalles
+                if (selectedExecutionId && activeExecs.find(e => e.id === selectedExecutionId)) {
+                    updateExecutionDetails(selectedExecutionId);
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="status error">Error al cargar ejecuciones: ${error.message}</div>`;
+            }
+        }
+
+        async function selectExecution(executionId) {
+            selectedExecutionId = executionId;
+            updateActiveExecutions();
+            updateExecutionDetails(executionId);
+        }
+
+        async function updateExecutionDetails(executionId) {
+            const detailsEl = document.getElementById('execution-details');
+            
+            try {
+                const response = await fetch(`${API_BASE}/workflows/instances/${executionId}`);
+                const execution = await response.json();
+                
+                if (!response.ok) {
+                    detailsEl.innerHTML = '<div class="status error">Error al cargar detalles</div>';
+                    return;
+                }
+                
+                const steps = getWorkflowSteps(execution.workflowId);
+                const currentStepIndex = steps.findIndex(s => s.id === execution.data?.currentStep);
+                
+                detailsEl.innerHTML = `
+                    <div class="execution-details">
+                        <div class="detail-row">
+                            <span class="detail-label">ID:</span>
+                            <span class="detail-value">${execution.id}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Workflow:</span>
+                            <span class="detail-value">${execution.workflowId}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Estado:</span>
+                            <span class="status-badge ${execution.status}">${execution.status}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Creado:</span>
+                            <span class="detail-value">${new Date(execution.createTime).toLocaleString()}</span>
+                        </div>
+                        ${execution.finishedOn ? `
+                            <div class="detail-row">
+                                <span class="detail-label">Finalizado:</span>
+                                <span class="detail-value">${new Date(execution.finishedOn).toLocaleString()}</span>
+                            </div>
+                        ` : ''}
+                        
+                        <h4 style="color: #ffd93d; margin: 15px 0 10px 0;">Progreso del Workflow</h4>
+                        <div class="step-indicator">
+                            ${steps.map((step, index) => `
+                                <span class="step ${
+                                    index < currentStepIndex ? 'completed' : 
+                                    index === currentStepIndex ? 'active' : ''
+                                }">${step.name}</span>
+                            `).join('')}
+                        </div>
+                        
+                        <h4 style="color: #ffd93d; margin: 15px 0 10px 0;">Datos del Workflow</h4>
+                        <div class="json-viewer">${JSON.stringify(execution.data, null, 2)}</div>
+                        
+                        ${execution.error ? `
+                            <h4 style="color: #ff6b6b; margin: 15px 0 10px 0;">Error</h4>
+                            <div class="status error">${execution.error}</div>
+                        ` : ''}
+                    </div>
+                `;
+            } catch (error) {
+                detailsEl.innerHTML = `<div class="status error">Error: ${error.message}</div>`;
+            }
+        }
+
+        function getWorkflowSteps(workflowId) {
+            // Definir los pasos de cada workflow
+            const steps = {
+                'loop-workflow': [
+                    { id: 'initial-wait', name: '⏱️ Espera Inicial' },
+                    { id: 'print-hello', name: '🌍 Hello World' },
+                    { id: 'wait-before-loop', name: '⏳ Espera' },
+                    { id: 'goto-loop', name: '🔄 Loop' }
+                ],
+                'conditional-loop': [
+                    { id: 'check-condition', name: '🔍 Verificar' },
+                    { id: 'router', name: '🚦 Enrutar' },
+                    { id: 'execute-action', name: '⚡ Ejecutar' },
+                    { id: 'wait-and-decide', name: '⏰ Decidir' }
+                ],
+                'sample-workflow': [
+                    { id: 'process-data', name: '⚙️ Procesar' },
+                    { id: 'validate-data', name: '✅ Validar' },
+                    { id: 'send-notification', name: '📧 Notificar' }
+                ],
+                'error-handling-workflow': [
+                    { id: 'process-with-retry', name: '🔄 Procesar' },
+                    { id: 'complete', name: '✅ Completar' }
+                ]
+            };
+            
+            return steps[workflowId] || [];
+        }
+
+        function getWorkflowName(workflowId) {
+            const names = {
+                'loop-workflow': 'Loop Workflow',
+                'conditional-loop': 'Conditional Loop',
+                'sample-workflow': 'Sample Workflow',
+                'error-handling-workflow': 'Error Handling'
+            };
+            return names[workflowId] || workflowId;
+        }
+
+        function getProgress(execution) {
+            // Calcular progreso basado en el estado y los pasos
+            if (execution.status === 'completed') return 100;
+            if (execution.status === 'failed' || execution.status === 'cancelled') return 0;
+            
+            const steps = getWorkflowSteps(execution.workflowId);
+            const currentStepIndex = steps.findIndex(s => s.id === execution.data?.currentStep);
+            
+            if (currentStepIndex === -1) return 0;
+            return Math.round((currentStepIndex + 1) / steps.length * 100);
+        }
+
+        async function loadExecutionHistory() {
+            const historyEl = document.getElementById('execution-history');
+            historyEl.innerHTML = '<div class="status info">Cargando historial... <span class="spinner"></span></div>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/workflows/executions`);
+                const executions = await response.json();
+                
+                if (executions.length === 0) {
+                    historyEl.innerHTML = '<div class="status info">No hay ejecuciones en el historial</div>';
+                    return;
+                }
+                
+                historyEl.innerHTML = executions.map(exec => `
+                    <div class="execution-item" onclick="showExecutionDetails('${exec.id}')">
+                        <div class="header">
+                            <div>
+                                <strong>${getWorkflowName(exec.workflowId)}</strong>
+                                <div class="id">${exec.id}</div>
+                                <small>${new Date(exec.createTime).toLocaleString()}</small>
+                            </div>
+                            <span class="status-badge ${exec.status}">${exec.status}</span>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                historyEl.innerHTML = `<div class="status error">Error al cargar historial: ${error.message}</div>`;
+            }
+        }
+
+        function showExecutionDetails(executionId) {
+            document.getElementById('instance-id').value = executionId;
+            checkStatus();
+        }
+
         async function checkStatus() {
             const instanceId = document.getElementById('instance-id').value.trim();
             if (!instanceId) {
@@ -628,7 +1049,7 @@
                 if (response.ok) {
                     const statusClass = data.status === 'completed' ? 'success' : 
                                       data.status === 'failed' ? 'error' : 
-                                      data.status === 'active' ? 'info' : 'pending';
+                                      data.status === 'active' || data.status === 'running' ? 'info' : 'pending';
                     
                     resultEl.innerHTML = `
                         <div class="status ${statusClass}">
@@ -636,13 +1057,6 @@
                         </div>
                         <div class="json-viewer">${JSON.stringify(data, null, 2)}</div>
                     `;
-                    
-                    // Actualizar historial si existe
-                    const historyItem = executionHistory.find(item => item.id === instanceId);
-                    if (historyItem) {
-                        historyItem.status = data.status;
-                        updateExecutionHistory();
-                    }
                 } else {
                     resultEl.innerHTML = `
                         <div class="status error">
@@ -658,25 +1072,6 @@
                     </div>
                 `;
             }
-        }
-
-        function updateExecutionHistory() {
-            const historyEl = document.getElementById('execution-history');
-            
-            if (executionHistory.length === 0) {
-                historyEl.innerHTML = '<div class="status info">No hay ejecuciones todavía</div>';
-                return;
-            }
-            
-            historyEl.innerHTML = executionHistory.map(item => `
-                <div class="execution-item">
-                    <div>
-                        <div class="id">${item.id}</div>
-                        <small>${item.workflowName} - ${item.timestamp.toLocaleTimeString()}</small>
-                    </div>
-                    <span class="status-badge ${item.status}">${item.status}</span>
-                </div>
-            `).join('');
         }
 
         async function checkServerHealth() {

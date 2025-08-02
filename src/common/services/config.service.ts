@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 
 @Injectable()
 export class ConfigService {
@@ -11,72 +12,60 @@ export class ConfigService {
   }
 
   get databaseUrl(): string {
-    return (
-      process.env.DATABASE_URL ||
-      'postgresql://postgres:password@localhost:5432/flamebot'
-    );
+    return process.env.DATABASE_URL || 'postgresql://localhost:5432/flamebot';
+  }
+
+  get logLevel(): string {
+    return process.env.LOG_LEVEL || 'info';
+  }
+
+  get logSql(): boolean {
+    return process.env.LOG_SQL === 'true';
+  }
+
+  get logSqlErrorOnly(): boolean {
+    return process.env.LOG_SQL_ERROR_ONLY === 'true';
   }
 
   get redisConfig() {
-    try {
-      const url = new URL(this.redisUrl);
-      return {
-        host: url.hostname,
-        port: parseInt(url.port) || 6379,
-        password: url.password || undefined,
-        username: url.username || undefined,
-      };
-    } catch (error) {
-      console.warn('Error parsing REDIS_URL, using default configuration');
-      return {
-        host: 'localhost',
-        port: 6379,
-      };
-    }
+    const url = new URL(this.redisUrl);
+    return {
+      host: url.hostname,
+      port: parseInt(url.port),
+      password: url.password,
+      username: url.username || 'default',
+    };
   }
 
-  get databaseConfig() {
-    try {
-      const url = new URL(this.databaseUrl);
-      const isRailway =
-        url.hostname.includes('rlwy.net') || url.hostname.includes('railway');
+  get databaseConfig(): TypeOrmModuleOptions {
+    const url = new URL(this.databaseUrl);
+    return {
+      type: 'postgres',
+      host: url.hostname,
+      port: parseInt(url.port),
+      username: url.username,
+      password: url.password,
+      database: url.pathname.slice(1),
+      entities: [__dirname + '/../../**/*.entity{.ts,.js}'],
+      synchronize: process.env.NODE_ENV !== 'production',
+      logging: this.getLoggingConfig(),
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    };
+  }
 
-      return {
-        type: 'postgres' as const,
-        host: url.hostname,
-        port: parseInt(url.port) || 5432,
-        username: url.username || 'postgres',
-        password: url.password || 'password',
-        database: url.pathname.slice(1) || 'railway',
-        entities: [__dirname + '/../../**/*.entity{.ts,.js}'],
-        synchronize: this.isDevelopment,
-        logging: this.isDevelopment,
-        // Configuración específica para Railway
-        ssl: isRailway ? { rejectUnauthorized: false } : false,
-        retryAttempts: 10,
-        retryDelay: 3000,
-        // Configuraciones adicionales para estabilidad
-        extra: {
-          connectionLimit: 10,
-          acquireTimeout: 60000,
-          timeout: 60000,
-        },
-      };
-    } catch (error) {
-      console.warn('Error parsing DATABASE_URL, using default configuration');
-      return {
-        type: 'postgres' as const,
-        host: 'localhost',
-        port: 5432,
-        username: 'postgres',
-        password: 'password',
-        database: 'flamebot',
-        entities: [__dirname + '/../../**/*.entity{.ts,.js}'],
-        synchronize: this.isDevelopment,
-        logging: this.isDevelopment,
-        retryAttempts: 10,
-        retryDelay: 3000,
-      };
+  private getLoggingConfig(): TypeOrmModuleOptions['logging'] {
+    if (!this.logSql && !this.logSqlErrorOnly) {
+      return false;
     }
+
+    if (this.logSqlErrorOnly) {
+      return ['error', 'warn'];
+    }
+
+    if (this.logSql) {
+      return ['query', 'error', 'warn', 'info', 'log'];
+    }
+
+    return false;
   }
 }

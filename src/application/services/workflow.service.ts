@@ -152,6 +152,18 @@ export class WorkflowService {
           description: 'Workflow con manejo de errores y compensación',
           version: 1,
         },
+        {
+          id: 'loop-workflow',
+          name: 'Loop Workflow with Waits',
+          description: 'Workflow con loop infinito y esperas de 20 segundos',
+          version: 1,
+        },
+        {
+          id: 'conditional-loop',
+          name: 'Conditional Loop Workflow',
+          description: 'Workflow con rutas condicionales y loops',
+          version: 1,
+        },
       ],
     };
   }
@@ -167,7 +179,12 @@ export class WorkflowService {
 
   private isValidWorkflowId(workflowId: string): boolean {
     // Por ahora validamos contra una lista hardcodeada
-    const validWorkflows = ['sample-workflow', 'error-handling-workflow'];
+    const validWorkflows = [
+      'sample-workflow',
+      'error-handling-workflow',
+      'loop-workflow',
+      'conditional-loop',
+    ];
     return validWorkflows.includes(workflowId);
   }
 }

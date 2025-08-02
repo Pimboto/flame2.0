@@ -11,6 +11,10 @@ import {
   errorHandlingWorkflowDefinition,
   WorkflowDefinition,
 } from '../domain/workflows/sample.workflow';
+import {
+  loopWorkflowDefinition,
+  conditionalLoopWorkflow,
+} from '../domain/workflows/examples/loop-workflows';
 import { ConfigService } from '../common/services/config.service';
 import { WorkflowExecutionRepository } from './repositories/workflow-execution.repository';
 import { WorkflowExecution } from '../domain/entities/workflow-execution.entity';
@@ -45,6 +49,8 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
       // Registrar workflows predefinidos
       this.registerWorkflow(sampleWorkflowDefinition);
       this.registerWorkflow(errorHandlingWorkflowDefinition);
+      this.registerWorkflow(loopWorkflowDefinition);
+      this.registerWorkflow(conditionalLoopWorkflow);
 
       this.logger.log('Workflow engine iniciado exitosamente');
     } catch (error) {
