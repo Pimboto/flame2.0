@@ -1,0 +1,12 @@
+{
+  "recommendations": [
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "ms-vscode.vscode-typescript-next",
+    "christian-kohler.path-intellisense",
+    "mikestead.dotenv",
+    "gruntfuggly.todo-tree",
+    "usernamehw.errorlens",
+    "aaron-bond.better-comments"
+  ]
+}

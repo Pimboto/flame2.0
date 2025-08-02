@@ -1,0 +1,7 @@
+packages:
+  # Backend principal
+  - '.'
+  # Futuros paquetes compartidos
+  # - 'packages/*'
+  # Futuras aplicaciones
+  # - 'apps/*'
