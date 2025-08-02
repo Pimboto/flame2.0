@@ -156,6 +156,15 @@ export class WorkflowService {
     };
   }
 
+  async getExecutionHistory(): Promise<any> {
+    try {
+      return await this.workflowEngine.getExecutionHistory();
+    } catch (error) {
+      this.logger.error('Error obteniendo historial de ejecuciones:', error);
+      throw error;
+    }
+  }
+
   private isValidWorkflowId(workflowId: string): boolean {
     // Por ahora validamos contra una lista hardcodeada
     const validWorkflows = ['sample-workflow', 'error-handling-workflow'];

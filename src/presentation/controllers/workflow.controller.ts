@@ -56,6 +56,12 @@ export class WorkflowController {
     return await this.workflowService.terminateWorkflow(instanceId);
   }
 
+  @Get('executions')
+  async getExecutionHistory() {
+    this.logger.log('Obteniendo historial de ejecuciones');
+    return await this.workflowService.getExecutionHistory();
+  }
+
   @Post(':workflowId/test')
   async testWorkflow(
     @Param('workflowId') workflowId: string,
