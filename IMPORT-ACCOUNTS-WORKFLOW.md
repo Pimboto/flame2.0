@@ -1,29 +1,38 @@
-# 📱 Import Accounts Workflow - Documentación
+# 📱 Import Accounts Workflow - Documentación Técnica
 
 ## 🎯 Descripción
 
-Workflow automatizado para importar cuentas de Tinder desde la API externa de Flamebot. El proceso incluye:
-1. Envío de cuentas a la API
-2. Polling del estado de importación
-3. Obtención de detalles de cuentas exitosas
-4. Almacenamiento en base de datos
+Workflow orquestado para importar cuentas de Tinder desde API externa (Flamebot) siguiendo Clean Architecture. Implementa un proceso robusto de 4 pasos con manejo de errores, polling inteligente y persistencia automática.
 
-## 🏗️ Arquitectura
+**Funcionalidades principales:**
+- ✅ Importación masiva de cuentas con validación
+- ✅ Polling automático con timeout y reintentos
+- ✅ Manejo de estados COMPLETED/FAILED con terminación limpia
+- ✅ Persistencia en PostgreSQL siguiendo Domain-Driven Design
+- ✅ Logs detallados para debugging y monitoreo
+- ✅ Arquitectura extensible para nuevos pasos/APIs
 
-El workflow sigue estrictamente los principios de Clean Architecture:
+## 🏗️ Arquitectura Clean
+
+El workflow respeta estrictamente los principios del @MUST-READ-RULES.md:
 
 ```
-/domain/
-  ├── entities/account.entity.ts         # Entidad de dominio pura
-  ├── interfaces/account.repository.ts   # Interface del repositorio
-  └── workflows/import-accounts-workflow.ts # Definición del workflow
-
-/infrastructure/
-  ├── persistence/entities/account.entity.ts # Entidad TypeORM
-  └── repositories/account.repository.ts     # Implementación del repositorio
-
-/account.module.ts # Módulo de NestJS con DI
+src/
+├── domain/
+│   ├── entities/account.entity.ts                    # ✅ Entidad pura sin frameworks
+│   ├── repositories/account.repository.interface.ts  # ✅ Interface sin implementación
+│   └── workflows/import-accounts-workflow.ts         # ✅ Lógica de negocio pura
+├── infrastructure/
+│   ├── entities/account.entity.ts                    # ✅ TypeORM separado del dominio
+│   └── repositories/account.repository.ts            # ✅ Implementación concreta
+└── database.module.ts                                # ✅ DI configuration
 ```
+
+**Separación de responsabilidades:**
+- **Domain**: Entidades inmutables + interfaces + workflows
+- **Infrastructure**: TypeORM + implementaciones + persistencia
+- **Application**: Orquestación (WorkflowEngineService)
+- **Presentation**: Controllers + DTOs
 
 ## 🚀 Uso
 
@@ -77,27 +86,61 @@ curl http://localhost:3000/api/v1/workflows/instances/{executionId}
 curl http://localhost:3000/api/v1/workflows/executions
 ```
 
-## 📊 Flujo del Workflow
+## 📊 Flujo del Workflow (4 Pasos)
 
-### Paso 1: Import Accounts (`import-accounts`)
-- **Endpoint**: POST `https://api.flamebot-tin.com/api/add-tinder-cards`
-- **Timeout**: 60 segundos
-- **Output**: `task_id` para polling
+### Paso 1: `import-accounts` 
+```typescript
+// POST https://api.flamebot-tin.com/api/add-tinder-cards
+handler: async (data: ImportAccountsData) => {
+  const response = await makeHttpRequest(url, { method: 'POST', ... });
+  return { ...data, taskId: response.task_id, _workflowActive: true };
+}
+```
+- **Timeout**: 60s | **Output**: `task_id` | **Next**: `poll-status`
 
-### Paso 2: Poll Status (`poll-status`)
-- **Endpoint**: GET `https://api.flamebot-tin.com/api/get-add-tinder-cards-status/{task_id}`
-- **Intervalo**: 4 segundos
-- **Timeout máximo**: 10 minutos (150 intentos)
-- **Estados**: PENDING, STARTED, COMPLETED, FAILED
+### Paso 2: `poll-status` (⚡ Lógica Inteligente)
+```typescript
+handler: async (data: ImportAccountsData) => {
+  if (statusResponse.status === 'COMPLETED') {
+    // Si successful_count === 0 → Terminar workflow
+    if (successfulCount === 0) {
+      return { ...data, _workflowActive: false, _workflowCompleted: true };
+    }
+    // Si hay exitosas → Continuar a fetch-account-details
+    return { ...data, _nextStep: 'fetch-account-details' };
+  }
+  // Si STARTED/PENDING → Volver a poll-status (loop)
+  return { ...data, _nextStep: 'poll-status' };
+}
+```
+- **Intervalo**: 4s | **Max**: 150 intentos (10min) | **Estados**: PENDING/STARTED/COMPLETED/FAILED
+- **Lógica de terminación**: Evita bucles infinitos cuando no hay cuentas exitosas
 
-### Paso 3: Fetch Account Details (`fetch-account-details`)
-- **Endpoint**: POST `https://api.flamebot-tin.com/api/get-tinder-accounts-by-ids`
-- **Input**: Array de `successful_ids`
-- **Output**: Detalles completos de las cuentas
+### Paso 3: `fetch-account-details`
+```typescript
+// POST https://api.flamebot-tin.com/api/get-tinder-accounts-by-ids
+handler: async (data: ImportAccountsData) => {
+  const detailsResponse = await makeHttpRequest(url, { body: successful_ids });
+  const importedAccounts = detailsResponse.accounts.map(mapToAccount);
+  return { ...data, importedAccounts, _nextStep: 'save-accounts' };
+}
+```
+- **Input**: `successful_ids[]` | **Output**: Accounts con detalles completos
 
-### Paso 4: Save Accounts (`save-accounts`)
-- **Acción**: Convierte a entidades de dominio y prepara para guardar
-- **Output**: Resumen con estadísticas
+### Paso 4: `save-accounts` (🗄️ Persistencia)
+```typescript
+handler: async (data: ImportAccountsData) => {
+  // Crear entidades de dominio
+  const domainAccounts = accountsToSave.map(Account.create);
+  
+  // Obtener repositorio via DI
+  const accountRepository = WorkflowEngineService.getAccountRepository();
+  await accountRepository.saveMany(domainAccounts);
+  
+  return { ...data, _workflowActive: false, _workflowCompleted: true };
+}
+```
+- **Acción**: Domain entities → TypeORM persistence | **Output**: Summary con estadísticas
 
 ## 📈 Métricas y Logs
 
@@ -129,17 +172,35 @@ El workflow proporciona logs detallados:
 # El token de API se pasa como parámetro en cada ejecución
 ```
 
-### Base de Datos
-La tabla `accounts` se crea automáticamente con las siguientes columnas:
-- `id` (UUID)
-- `external_id` (único, indexado)
-- `account_string`
-- `account_origin`
-- `class_type`, `class_color`
-- `name`, `age`, `phone`, `email`, etc.
-- `proxy_https`
-- `status` (indexado)
-- `created_at`, `updated_at`
+### Base de Datos (PostgreSQL)
+```sql
+-- Tabla generada automáticamente por TypeORM
+CREATE TABLE accounts (
+    id UUID PRIMARY KEY,
+    external_id VARCHAR UNIQUE NOT NULL,    -- API external ID
+    account_string TEXT NOT NULL,           -- Tinder session string
+    account_origin VARCHAR NOT NULL,        -- 'ios', 'android', etc
+    class_type VARCHAR NOT NULL,            -- 'Iris', 'Premium', etc
+    class_color VARCHAR NOT NULL,           -- '#ffb3f5', '#gold', etc
+    name VARCHAR NOT NULL,
+    age INTEGER,
+    phone VARCHAR,
+    email VARCHAR,
+    account_tag VARCHAR,
+    image VARCHAR,
+    location VARCHAR,
+    is_verified BOOLEAN DEFAULT FALSE,
+    proxy_https VARCHAR NOT NULL,           -- Proxy configuration
+    status VARCHAR NOT NULL,                -- 'alive', 'dead', 'suspended'
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Índices automáticos
+CREATE UNIQUE INDEX idx_accounts_external_id ON accounts(external_id);
+CREATE INDEX idx_accounts_status ON accounts(status);
+CREATE INDEX idx_accounts_created_at ON accounts(created_at);
+```
 
 ## 🧪 Testing
 
@@ -180,6 +241,139 @@ ORDER BY created_at DESC;
    - Intervalo de polling: 4 segundos
    - Sin límite en cantidad de cuentas por batch
 
-3. **Persistencia**: Las cuentas se convierten a entidades de dominio pero el guardado real en BD debe implementarse según necesidades específicas.
+3. **Persistencia**: ✅ **IMPLEMENTADO** - Las cuentas se convierten a entidades de dominio y se guardan automáticamente en PostgreSQL via Repository Pattern.
 
 4. **Monitoreo**: Use las herramientas de monitoreo de BullMQ para ver el estado de las colas en tiempo real.
+
+---
+
+## 🚀 Extensibilidad para Desarrolladores
+
+### Agregar Nuevos Pasos al Workflow
+
+```typescript
+// En /domain/workflows/import-accounts-workflow.ts
+
+const newCustomStep: WorkflowStep = {
+  name: 'Custom Processing',
+  timeout: 30000,
+  handler: async (data: ImportAccountsData) => {
+    console.log('🔧 [CustomStep] Procesando lógica personalizada...');
+    
+    // Tu lógica aquí
+    const processedData = await customProcessing(data.importedAccounts);
+    
+    return {
+      ...data,
+      customProcessedData: processedData,
+      _workflowActive: true,
+      _nextStep: 'next-step-name' // o undefined para terminar
+    };
+  },
+  nextStep: 'save-accounts' // Paso por defecto
+};
+
+// Registrar en el Map
+steps: new Map([
+  ['import-accounts', importAccountsStep],
+  ['poll-status', pollStatusStep], 
+  ['fetch-account-details', fetchAccountDetailsStep],
+  ['custom-processing', newCustomStep], // ← Nuevo paso
+  ['save-accounts', saveAccountsStep]
+])
+```
+
+### Agregar Nuevas APIs Externas
+
+```typescript
+// Crear nueva función HTTP helper
+async function makeCustomApiRequest(endpoint: string, data: any) {
+  return await makeHttpRequest(`https://nueva-api.com${endpoint}`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${data.customToken}` },
+    body: JSON.stringify(data)
+  });
+}
+
+// Usarla en el handler
+handler: async (data: ImportAccountsData) => {
+  const response = await makeCustomApiRequest('/process', data);
+  return { ...data, customApiResponse: response };
+}
+```
+
+### Extender Consultas a la Tabla Accounts
+
+```typescript
+// En /domain/repositories/account.repository.interface.ts
+export interface IAccountRepository {
+  save(account: Account): Promise<void>;
+  saveMany(accounts: Account[]): Promise<void>;
+  
+  // ← Agregar nuevos métodos aquí
+  findByStatus(status: string): Promise<Account[]>;
+  findByClassType(classType: string): Promise<Account[]>;
+  findCreatedAfter(date: Date): Promise<Account[]>;
+  updateStatus(id: string, status: string): Promise<void>;
+}
+
+// En /infrastructure/repositories/account.repository.ts
+async findByStatus(status: string): Promise<Account[]> {
+  const entities = await this.accountRepository.find({ 
+    where: { status } 
+  });
+  return entities.map(entity => this.toDomain(entity));
+}
+```
+
+### Agregar Validaciones de Negocio
+
+```typescript
+// En /domain/entities/account.entity.ts
+static create(
+  externalId: string,
+  accountString: string,
+  // ... otros params
+): Account {
+  // ← Agregar validaciones aquí
+  if (!externalId || externalId.length < 10) {
+    throw new Error('Invalid external ID');
+  }
+  
+  if (!accountString.includes(':')) {
+    throw new Error('Invalid account string format');
+  }
+  
+  return new Account(/* ... */);
+}
+```
+
+### Monitoreo y Métricas Customizadas
+
+```typescript
+// En el handler de cualquier paso
+handler: async (data: ImportAccountsData) => {
+  const startTime = Date.now();
+  
+  try {
+    // Tu lógica aquí
+    const result = await processData(data);
+    
+    // Métrica de éxito
+    console.log(`✅ [CustomStep] Procesado en ${Date.now() - startTime}ms`);
+    
+    return result;
+  } catch (error) {
+    // Métrica de error
+    console.error(`❌ [CustomStep] Error después de ${Date.now() - startTime}ms:`, error);
+    throw error;
+  }
+}
+```
+
+**Reglas importantes para extensiones:**
+- ✅ Mantener separación de capas (Domain/Infrastructure)
+- ✅ Usar interfaces para nuevas dependencias
+- ✅ Agregar logs descriptivos para debugging
+- ✅ Manejar errores apropiadamente
+- ✅ Testear nuevos pasos independientemente
