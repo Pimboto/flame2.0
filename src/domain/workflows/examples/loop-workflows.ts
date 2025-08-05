@@ -21,6 +21,7 @@ export const loopWorkflowDefinition: WorkflowDefinition = {
           iteration: iteration + 1,
           startedAt: data.startedAt || new Date(),
           lastAction: 'initial-wait',
+          _workflowActive: true, // Flag para indicar que el workflow sigue activo
         };
       },
       nextStep: 'print-hello',
@@ -46,6 +47,7 @@ export const loopWorkflowDefinition: WorkflowDefinition = {
           messages,
           lastAction: 'print-hello',
           lastPrint: new Date(),
+          _workflowActive: true,
         };
       },
       nextStep: 'wait-before-loop',
@@ -57,15 +59,17 @@ export const loopWorkflowDefinition: WorkflowDefinition = {
         logger.log('⏳ Esperando 20 segundos antes de repetir...', 'LoopWorkflow');
         
         // Verificar si debemos continuar el loop
-        const maxIterations = data.maxIterations || 10; // Por defecto 10 iteraciones
+        const maxIterations = data.maxIterations || Infinity; // Sin límite por defecto
         
-        if (data.iteration >= maxIterations) {
+        if (data.maxIterations && data.iteration >= maxIterations) {
           logger.log('🛑 Alcanzado el máximo de iteraciones. Terminando workflow.', 'LoopWorkflow');
           return {
             ...data,
             completed: true,
             completedAt: new Date(),
             lastAction: 'completed',
+            _workflowActive: false, // Marcar como inactivo
+            _workflowCompleted: true, // Marcar como realmente completado
           };
         }
         
@@ -73,6 +77,7 @@ export const loopWorkflowDefinition: WorkflowDefinition = {
           ...data,
           lastAction: 'wait-before-loop',
           shouldContinue: true,
+          _workflowActive: true,
         };
       },
       nextStep: 'goto-loop', // Ir al paso de decisión
@@ -84,13 +89,23 @@ export const loopWorkflowDefinition: WorkflowDefinition = {
       handler: async (data) => {
         logger.log('🔄 Volviendo al inicio del loop...', 'LoopWorkflow');
         
+        // Si el workflow fue marcado para terminar, no continuar
+        if (data._workflowCompleted) {
+          return {
+            ...data,
+            lastAction: 'completed',
+            _workflowActive: false,
+          };
+        }
+        
         // Este paso simplemente pasa los datos al siguiente
         return {
           ...data,
           lastAction: 'goto-loop',
+          _workflowActive: true,
         };
       },
-      nextStep: 'print-hello', // Volver a imprimir hello world
+      nextStep: 'print-hello', // Volver a imprimir hello world (LOOP)
     }],
   ]),
 };
@@ -123,6 +138,7 @@ export const conditionalLoopWorkflow: WorkflowDefinition = {
           counter: counter + 1,
           selectedPath: nextPath,
           lastCheck: new Date(),
+          _workflowActive: true,
         };
       },
       nextStep: 'router',
@@ -133,9 +149,10 @@ export const conditionalLoopWorkflow: WorkflowDefinition = {
       handler: async (data) => {
         logger.log(`🚦 Enrutando a: ${data.selectedPath}`, 'ConditionalLoop');
         
-        // En un workflow real, aquí iríamos dinámicamente al paso correcto
-        // Por limitaciones de la implementación actual, seguimos un flujo lineal
-        return data;
+        return {
+          ...data,
+          _workflowActive: true,
+        };
       },
       nextStep: 'execute-action',
     }],
@@ -165,6 +182,7 @@ export const conditionalLoopWorkflow: WorkflowDefinition = {
           ...data,
           actionHistory,
           lastAction: action,
+          _workflowActive: true,
         };
       },
       nextStep: 'wait-and-decide',
@@ -183,12 +201,17 @@ export const conditionalLoopWorkflow: WorkflowDefinition = {
             ...data,
             completed: true,
             completedAt: new Date(),
+            _workflowActive: false,
+            _workflowCompleted: true,
           };
         }
         
-        return data;
+        return {
+          ...data,
+          _workflowActive: true,
+        };
       },
-      nextStep: 'check-condition', // Volver al inicio
+      nextStep: 'check-condition', // Volver al inicio (LOOP)
       delay: 10000, // 10 segundos
     }],
   ]),

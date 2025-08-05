@@ -209,6 +209,59 @@
             background: #1e3a5f;
         }
 
+        .execution-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .control-btn {
+            padding: 6px 12px;
+            font-size: 0.85em;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 1px solid;
+            transition: all 0.2s ease;
+            background: transparent;
+            flex: 1;
+        }
+
+        .control-btn:hover {
+            transform: translateY(-1px);
+        }
+
+        .control-btn.pause {
+            color: #ffc107;
+            border-color: #ffc107;
+        }
+
+        .control-btn.pause:hover {
+            background: rgba(255, 193, 7, 0.2);
+        }
+
+        .control-btn.resume {
+            color: #4caf50;
+            border-color: #4caf50;
+        }
+
+        .control-btn.resume:hover {
+            background: rgba(76, 175, 80, 0.2);
+        }
+
+        .control-btn.stop {
+            color: #f44336;
+            border-color: #f44336;
+        }
+
+        .control-btn.stop:hover {
+            background: rgba(244, 67, 54, 0.2);
+        }
+
+        .control-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
         .execution-item .header {
             display: flex;
             justify-content: space-between;
@@ -863,6 +916,17 @@
                             <div class="progress-bar">
                                 <div class="progress-fill" style="width: ${getProgress(exec)}%"></div>
                             </div>
+                            <div class="execution-controls">
+                                <button class="control-btn pause" onclick="event.stopPropagation(); controlWorkflow('${exec.id}', 'suspend')" ${exec.status === 'cancelled' ? 'disabled' : ''}>
+                                    ⏸️ Pausar
+                                </button>
+                                <button class="control-btn resume" onclick="event.stopPropagation(); controlWorkflow('${exec.id}', 'resume')" ${exec.status !== 'cancelled' ? 'disabled' : ''}>
+                                    ▶️ Reanudar
+                                </button>
+                                <button class="control-btn stop" onclick="event.stopPropagation(); controlWorkflow('${exec.id}', 'terminate')">
+                                    ⏹️ Terminar
+                                </button>
+                            </div>
                         </div>
                     `;
                 }).join('');
@@ -990,6 +1054,22 @@
             if (execution.status === 'completed') return 100;
             if (execution.status === 'failed' || execution.status === 'cancelled') return 0;
             
+            // Para workflows con loops, mostrar progreso cíclico
+            if (execution.workflowId === 'loop-workflow' || execution.workflowId === 'conditional-loop') {
+                const iteration = execution.data?.iteration || 1;
+                const maxIterations = execution.data?.maxIterations || 0;
+                
+                if (maxIterations > 0) {
+                    return Math.round((iteration / maxIterations) * 100);
+                } else {
+                    // Loop infinito - mostrar progreso cíclico
+                    const steps = getWorkflowSteps(execution.workflowId);
+                    const currentStepIndex = steps.findIndex(s => s.id === execution.data?.currentStep);
+                    if (currentStepIndex === -1) return 0;
+                    return Math.round(((currentStepIndex + 1) / steps.length) * 100);
+                }
+            }
+            
             const steps = getWorkflowSteps(execution.workflowId);
             const currentStepIndex = steps.findIndex(s => s.id === execution.data?.currentStep);
             
@@ -1020,6 +1100,16 @@
                             </div>
                             <span class="status-badge ${exec.status}">${exec.status}</span>
                         </div>
+                        ${(exec.status === 'running' || exec.status === 'pending' || exec.status === 'active') ? `
+                            <div class="execution-controls">
+                                <button class="control-btn pause" onclick="event.stopPropagation(); controlWorkflow('${exec.id}', 'suspend')">
+                                    ⏸️ Pausar
+                                </button>
+                                <button class="control-btn stop" onclick="event.stopPropagation(); controlWorkflow('${exec.id}', 'terminate')">
+                                    ⏹️ Terminar
+                                </button>
+                            </div>
+                        ` : ''}
                     </div>
                 `).join('');
             } catch (error) {
@@ -1073,6 +1163,123 @@
                 `;
             }
         }
+
+        async function controlWorkflow(executionId, action) {
+            try {
+                let endpoint = '';
+                let method = 'PUT';
+                let confirmMessage = '';
+                
+                switch(action) {
+                    case 'suspend':
+                        endpoint = `/workflows/instances/${executionId}/suspend`;
+                        confirmMessage = '¿Estás seguro de que quieres pausar este workflow?';
+                        break;
+                    case 'resume':
+                        endpoint = `/workflows/instances/${executionId}/resume`;
+                        confirmMessage = '¿Quieres reanudar este workflow?';
+                        break;
+                    case 'terminate':
+                        endpoint = `/workflows/instances/${executionId}`;
+                        method = 'DELETE';
+                        confirmMessage = '¿Estás seguro de que quieres TERMINAR este workflow? Esta acción no se puede deshacer.';
+                        break;
+                }
+                
+                if (!confirm(confirmMessage)) {
+                    return;
+                }
+                
+                const response = await fetch(`${API_BASE}${endpoint}`, {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    // Mostrar notificación temporal
+                    showNotification(`Workflow ${action === 'suspend' ? 'pausado' : action === 'resume' ? 'reanudado' : 'terminado'} exitosamente`, 'success');
+                    
+                    // Actualizar inmediatamente
+                    updateActiveExecutions();
+                    
+                    // Si es el workflow seleccionado, actualizar detalles
+                    if (executionId === selectedExecutionId) {
+                        updateExecutionDetails(executionId);
+                    }
+                } else {
+                    showNotification(`Error al ${action} el workflow: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        function showNotification(message, type = 'info') {
+            // Crear elemento de notificación
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 15px 20px;
+                border-radius: 8px;
+                color: white;
+                font-weight: 600;
+                z-index: 1000;
+                animation: slideIn 0.3s ease-out;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            `;
+            
+            switch(type) {
+                case 'success':
+                    notification.style.background = '#4caf50';
+                    break;
+                case 'error':
+                    notification.style.background = '#f44336';
+                    break;
+                default:
+                    notification.style.background = '#2196f3';
+            }
+            
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            // Remover después de 3 segundos
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease-in';
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+
+        // Agregar animaciones CSS
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes slideIn {
+                from {
+                    transform: translateX(100%);
+                    opacity: 0;
+                }
+                to {
+                    transform: translateX(0);
+                    opacity: 1;
+                }
+            }
+            @keyframes slideOut {
+                from {
+                    transform: translateX(0);
+                    opacity: 1;
+                }
+                to {
+                    transform: translateX(100%);
+                    opacity: 0;
+                }
+            }
+        `;
+        document.head.appendChild(style);
 
         async function checkServerHealth() {
             const healthEl = document.getElementById('server-health');

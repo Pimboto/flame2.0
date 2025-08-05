@@ -173,9 +173,27 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
             }
 
             const result = await step.handler(job.data);
+            
+            // Actualizar progreso en BD
+            if (execution) {
+              const updateData: any = {
+                outputData: {
+                  ...result,
+                  currentStep: stepId,
+                  lastUpdate: new Date(),
+                },
+              };
+              
+              // Si el workflow sigue activo, mantenerlo como running
+              if (result._workflowActive !== false) {
+                updateData.status = 'running';
+              }
+              
+              await this.executionRepository.update(execution.id, updateData);
+            }
 
             // Si hay siguiente paso, agregarlo a la cola
-            if (step.nextStep) {
+            if (step.nextStep && result._workflowActive !== false) {
               const nextQueueName = `${workflow.id}-${step.nextStep}`;
               const nextQueue = this.queues.get(nextQueueName);
 
@@ -184,8 +202,8 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
                   delay: step.delay || 0,
                 });
               }
-            } else {
-              // Es el último paso, marcar como completado
+            } else if (!step.nextStep || result._workflowCompleted === true) {
+              // Solo marcar como completado si realmente terminó
               if (execution) {
                 await this.executionRepository.update(execution.id, {
                   status: 'completed',
@@ -498,8 +516,10 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
 
     let currentStep = workflow.startStep;
     let data = testData;
+    let stepCount = 0;
+    const maxSteps = 100; // Límite de seguridad para evitar loops infinitos en tests
 
-    while (currentStep) {
+    while (currentStep && stepCount < maxSteps) {
       const step = workflow.steps.get(currentStep);
 
       if (!step) {
@@ -514,7 +534,18 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
       }
 
       data = await step.handler(data);
+      
+      // Verificar si el workflow debe terminar
+      if (data._workflowCompleted === true || data._workflowActive === false) {
+        break;
+      }
+      
       currentStep = step.nextStep || '';
+      stepCount++;
+    }
+
+    if (stepCount >= maxSteps) {
+      this.logger.warn('Test: Límite de pasos alcanzado, deteniendo ejecución');
     }
 
     return {
@@ -522,6 +553,7 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
       instanceId: `test-${Date.now()}`,
       data,
       completedAt: new Date(),
+      stepsExecuted: stepCount,
     };
   }
 
