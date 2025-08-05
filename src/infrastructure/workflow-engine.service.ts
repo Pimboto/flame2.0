@@ -8,9 +8,11 @@ import { Queue, Worker, Job, QueueEvents } from 'bullmq';
 import IORedis from 'ioredis';
 import { WorkflowDefinition } from '../domain/workflows/sample.workflow';
 import { safeAutomationWorkflow } from '../domain/workflows/examples/safe-automation-workflow';
+import { importAccountsWorkflow } from '../domain/workflows/import-accounts-workflow';
 import { ConfigService } from '../common/services/config.service';
 import { WorkflowExecutionRepository } from './repositories/workflow-execution.repository';
 import { WorkflowExecution } from '../domain/entities/workflow-execution.entity';
+import { AccountRepository } from './repositories/account.repository';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 // Configuración de concurrencia y performance
@@ -64,10 +66,24 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
     redisMemoryUsage: 0,
   };
 
+  // Instancia estática para acceso desde workflows
+  private static instance: WorkflowEngineService;
+
+  // Método estático para acceder al repositorio desde workflows
+  static getAccountRepository(): AccountRepository {
+    if (!WorkflowEngineService.instance) {
+      throw new Error('WorkflowEngineService not initialized');
+    }
+    return WorkflowEngineService.instance.accountRepository;
+  }
+
   constructor(
     private readonly configService: ConfigService,
     private readonly executionRepository: WorkflowExecutionRepository,
-  ) {}
+    private readonly accountRepository: AccountRepository,
+  ) {
+    WorkflowEngineService.instance = this;
+  }
 
   async onModuleInit() {
     await this.initializeWorkflowEngine();
@@ -85,8 +101,9 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
     try {
       await this.connectToRedis();
 
-      // Registrar solo el workflow seguro de automatización
+      // Registrar workflows disponibles
       this.registerWorkflow(safeAutomationWorkflow);
+      this.registerWorkflow(importAccountsWorkflow);
 
       this.logger.log('Workflow engine iniciado exitosamente');
       this.logger.log(
@@ -619,14 +636,17 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
               await this.executionRepository.update(execution.id, updateData);
             }
 
+            // Determinar el siguiente paso - priorizar _nextStep del resultado sobre step.nextStep
+            const nextStepName = result._nextStep || step.nextStep;
+
             // Si hay siguiente paso, agregarlo a la cola
-            if (step.nextStep && result._workflowActive !== false) {
-              const nextQueueName = `${workflow.id}-${step.nextStep}`;
+            if (nextStepName && result._workflowActive !== false) {
+              const nextQueueName = `${workflow.id}-${nextStepName}`;
               const nextQueue = this.queues.get(nextQueueName);
 
               if (nextQueue) {
                 const nextJob = await nextQueue.add(
-                  `step-${step.nextStep}`,
+                  `step-${nextStepName}`,
                   result,
                   {
                     delay: step.delay || 0,
@@ -634,10 +654,10 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
                 );
 
                 this.logger.log(
-                  `Siguiente paso agregado: ${step.nextStep}, Job ID: ${nextJob.id}`,
+                  `Siguiente paso agregado: ${nextStepName}, Job ID: ${nextJob.id}`,
                 );
               }
-            } else if (!step.nextStep || result._workflowCompleted === true) {
+            } else if (!nextStepName || result._workflowCompleted === true) {
               // Workflow completado - limpiar datos
               if (execution) {
                 await this.executionRepository.update(execution.id, {

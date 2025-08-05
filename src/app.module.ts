@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { WorkflowModule } from './workflow.module';
 import { DatabaseModule } from './database.module';
+// import { AccountModule } from './account.module'; // Temporalmente comentado
 import { ConfigModule } from './common/modules/config.module';
 import { ConfigService } from './common/services/config.service';
 import { CustomTypeOrmLogger } from './common/services/typeorm-logger.service';
@@ -32,6 +33,7 @@ import { CustomTypeOrmLogger } from './common/services/typeorm-logger.service';
       inject: [ConfigService],
     }),
     DatabaseModule,
+    // AccountModule, // Temporalmente comentado
     WorkflowModule,
   ],
   controllers: [],

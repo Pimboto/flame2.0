@@ -141,6 +141,13 @@ export class WorkflowService {
             'Workflow seguro con múltiples puntos de control y detención automática',
           version: 1,
         },
+        {
+          id: 'import-accounts-workflow',
+          name: 'Import Tinder Accounts Workflow',
+          description:
+            'Workflow para importar cuentas de Tinder desde la API externa',
+          version: 1,
+        },
       ],
     };
   }
@@ -188,7 +195,10 @@ export class WorkflowService {
 
   private isValidWorkflowId(workflowId: string): boolean {
     // Por ahora validamos contra una lista hardcodeada
-    const validWorkflows = ['safe-automation-workflow'];
+    const validWorkflows = [
+      'safe-automation-workflow',
+      'import-accounts-workflow',
+    ];
     return validWorkflows.includes(workflowId);
   }
 }
