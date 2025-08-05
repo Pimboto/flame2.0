@@ -5,6 +5,7 @@ export interface WorkflowStep {
   handler: (data: any) => Promise<any>;
   nextStep?: string;
   delay?: number;
+  timeout?: number; // Timeout en milisegundos para el paso
 }
 
 export interface WorkflowDefinition {

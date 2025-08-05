@@ -41,4 +41,27 @@ export class WorkflowExecutionRepository {
       order: { createdAt: 'DESC' },
     });
   }
+
+  async deleteOldExecutions(cutoffDate: Date): Promise<number> {
+    const result = await this.repository
+      .createQueryBuilder()
+      .delete()
+      .where('createdAt < :cutoffDate', { cutoffDate })
+      .andWhere('status IN (:...statuses)', { 
+        statuses: ['completed', 'failed', 'cancelled'] 
+      })
+      .execute();
+    
+    return result.affected || 0;
+  }
+
+  async getActiveExecutionsCount(): Promise<number> {
+    return await this.repository.count({
+      where: [
+        { status: 'running' },
+        { status: 'pending' },
+        { status: 'active' }
+      ]
+    });
+  }
 }

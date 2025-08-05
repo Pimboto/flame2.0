@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ScheduleModule } from '@nestjs/schedule';
 import { WorkflowModule } from './workflow.module';
 import { DatabaseModule } from './database.module';
 import { ConfigModule } from './common/modules/config.module';
@@ -9,6 +10,7 @@ import { CustomTypeOrmLogger } from './common/services/typeorm-logger.service';
 @Module({
   imports: [
     ConfigModule, // Debe ir primero para estar disponible globalmente
+    ScheduleModule.forRoot(), // Para cron jobs
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => {

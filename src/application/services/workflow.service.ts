@@ -177,6 +177,38 @@ export class WorkflowService {
     }
   }
 
+  async getQueueStats(): Promise<any> {
+    try {
+      return await this.workflowEngine.getQueueStats();
+    } catch (error) {
+      this.logger.error('Error obteniendo estadísticas de colas:', error);
+      throw error;
+    }
+  }
+
+  async getCapacityInfo(): Promise<any> {
+    try {
+      return this.workflowEngine.getCapacityInfo();
+    } catch (error) {
+      this.logger.error('Error obteniendo información de capacidad:', error);
+      throw error;
+    }
+  }
+
+  async forceCleanup(): Promise<any> {
+    try {
+      await this.workflowEngine.forceCleanup();
+      return {
+        success: true,
+        message: 'Limpieza ejecutada exitosamente',
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      this.logger.error('Error ejecutando limpieza:', error);
+      throw error;
+    }
+  }
+
   private isValidWorkflowId(workflowId: string): boolean {
     // Por ahora validamos contra una lista hardcodeada
     const validWorkflows = [

@@ -70,4 +70,22 @@ export class WorkflowController {
     this.logger.log(`Testeando workflow: ${workflowId}`);
     return await this.workflowService.testWorkflow(workflowId, testData);
   }
+
+  @Get('queues/stats')
+  async getQueueStats() {
+    this.logger.log('Obteniendo estadísticas de las colas');
+    return await this.workflowService.getQueueStats();
+  }
+
+  @Get('capacity')
+  async getCapacityInfo() {
+    this.logger.log('Obteniendo información de capacidad del sistema');
+    return await this.workflowService.getCapacityInfo();
+  }
+
+  @Post('maintenance/cleanup')
+  async forceCleanup() {
+    this.logger.log('Ejecutando limpieza manual del sistema');
+    return await this.workflowService.forceCleanup();
+  }
 }
