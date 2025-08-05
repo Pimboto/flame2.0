@@ -7,12 +7,14 @@ export class AppLogger implements LoggerService {
 
   constructor() {
     const logLevel = process.env.LOG_LEVEL || 'info';
-    
+
     // Formato más conciso para desarrollo
-    const devFormat = winston.format.printf(({ timestamp, level, message, context }) => {
-      const ctx = context ? `[${context}]` : '';
-      return `${timestamp} ${ctx} ${level}: ${message}`;
-    });
+    const devFormat = winston.format.printf(
+      ({ timestamp, level, message, context }) => {
+        const ctx = context ? `[${context}]` : '';
+        return `${timestamp} ${ctx} ${level}: ${message}`;
+      },
+    );
 
     // Formato completo para producción
     const prodFormat = winston.format.json();

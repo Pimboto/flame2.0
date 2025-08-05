@@ -23,31 +23,25 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 // Configuración de concurrencia y performance
 const WORKFLOW_CONFIG = {
   // Concurrencia por worker
-  WORKER_CONCURRENCY: 10,
-  
+  WORKER_CONCURRENCY: 100,
   // Número máximo de workers por tipo de workflow
   MAX_WORKERS_PER_WORKFLOW: 5,
-  
   // Configuración de jobs
   JOB_ATTEMPTS: 3,
   JOB_BACKOFF_DELAY: 2000,
-  
   // Limpieza automática de jobs completados (más agresiva)
   JOB_REMOVE_ON_COMPLETE_AGE: 300, // 5 minutos
   JOB_REMOVE_ON_COMPLETE_COUNT: 10, // Mantener solo los últimos 10
   JOB_REMOVE_ON_FAIL_AGE: 3600, // 1 hora
   JOB_REMOVE_ON_FAIL_COUNT: 50, // Mantener solo los últimos 50 fallidos
-  
   // Límites del sistema
   MAX_QUEUE_SIZE: 10000,
   MEMORY_CHECK_INTERVAL: 60000, // Verificar memoria cada minuto
-  MAX_MEMORY_USAGE_PERCENT: 80, // Alertar si la memoria supera 80%
-  
+  MAX_MEMORY_USAGE_PERCENT: 99, // Alertar si la memoria supera 80%
   // Configuración de Redis
   REDIS_MAX_RETRIES: 3,
   REDIS_RETRY_DELAY: 50,
   REDIS_CONNECTION_POOL_SIZE: 10,
-  
   // Limpieza de datos
   CLEANUP_INTERVAL: 300000, // Limpiar cada 5 minutos
   EXECUTION_RETENTION_DAYS: 7, // Mantener ejecuciones por 7 días
@@ -62,12 +56,12 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
   private queueEvents: Map<string, QueueEvents> = new Map();
   private redisConnection: IORedis | null = null;
   private isRedisAvailable = false;
-  
+
   // Control de memoria
-  private memoryCheckInterval: NodeJS.Timeout | null = null;
-  private cleanupInterval: NodeJS.Timeout | null = null;
+  private memoryCheckInterval: ReturnType<typeof setInterval> | null = null;
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   private activeJobs: Map<string, Job> = new Map();
-  
+
   // Métricas de performance
   private metrics = {
     totalJobsProcessed: 0,
@@ -105,12 +99,16 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
       this.registerWorkflow(conditionalLoopWorkflow);
 
       this.logger.log('Workflow engine iniciado exitosamente');
-      this.logger.log(`Configuración: ${JSON.stringify({
-        workerConcurrency: WORKFLOW_CONFIG.WORKER_CONCURRENCY,
-        maxWorkersPerWorkflow: WORKFLOW_CONFIG.MAX_WORKERS_PER_WORKFLOW,
-        maxThroughput: WORKFLOW_CONFIG.WORKER_CONCURRENCY * WORKFLOW_CONFIG.MAX_WORKERS_PER_WORKFLOW,
-        memoryLimit: WORKFLOW_CONFIG.MAX_MEMORY_USAGE_PERCENT + '%',
-      })}`);
+      this.logger.log(
+        `Configuración: ${JSON.stringify({
+          workerConcurrency: WORKFLOW_CONFIG.WORKER_CONCURRENCY,
+          maxWorkersPerWorkflow: WORKFLOW_CONFIG.MAX_WORKERS_PER_WORKFLOW,
+          maxThroughput:
+            WORKFLOW_CONFIG.WORKER_CONCURRENCY *
+            WORKFLOW_CONFIG.MAX_WORKERS_PER_WORKFLOW,
+          memoryLimit: WORKFLOW_CONFIG.MAX_MEMORY_USAGE_PERCENT + '%',
+        })}`,
+      );
     } catch (error) {
       this.logger.error('Error al iniciar workflow engine:', error);
     }
@@ -119,9 +117,19 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
   private async connectToRedis() {
     try {
       const redisConfig = this.configService.redisConfig;
-      
-      this.logger.log(`Intentando conectar a Redis: ${redisConfig.host}:${redisConfig.port}`);
-      
+
+      this.logger.log(
+        `Intentando conectar a Redis: ${redisConfig.host}:${redisConfig.port}`,
+      );
+      this.logger.debug(
+        `Configuración Redis: ${JSON.stringify({
+          host: redisConfig.host,
+          port: redisConfig.port,
+          username: redisConfig.username,
+          hasPassword: !!redisConfig.password,
+        })}`,
+      );
+
       // Conexión principal con configuración optimizada
       this.redisConnection = new IORedis({
         host: redisConfig.host,
@@ -132,19 +140,26 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
         enableReadyCheck: true,
         enableOfflineQueue: false,
         connectTimeout: 10000, // 10 segundos de timeout
-        
+        lazyConnect: true, // Cambiar a true para controlar la conexión
+
         // Optimizaciones de memoria
-        lazyConnect: false,
         keepAlive: 10000,
         connectionName: 'workflow-engine',
-        
+
         retryStrategy: (times) => {
           if (times > WORKFLOW_CONFIG.REDIS_MAX_RETRIES) {
-            this.logger.error('No se pudo conectar a Redis después de varios intentos');
+            this.logger.error(
+              'No se pudo conectar a Redis después de varios intentos',
+            );
             return null;
           }
-          const delay = Math.min(times * WORKFLOW_CONFIG.REDIS_RETRY_DELAY, 2000);
-          this.logger.warn(`Reintentando conexión a Redis (intento ${times}), esperando ${delay}ms`);
+          const delay = Math.min(
+            times * WORKFLOW_CONFIG.REDIS_RETRY_DELAY,
+            2000,
+          );
+          this.logger.warn(
+            `Reintentando conexión a Redis (intento ${times}), esperando ${delay}ms`,
+          );
           return delay;
         },
       });
@@ -156,40 +171,70 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
 
       this.redisConnection.on('ready', () => {
         this.logger.log('Redis listo para recibir comandos');
+        this.isRedisAvailable = true;
       });
 
       this.redisConnection.on('error', (err) => {
         this.logger.error('Error de Redis:', err.message || err);
+        if (err.message && err.message.includes('WRONGPASS')) {
+          this.logger.error(
+            'Error de autenticación - verifica las credenciales de Redis',
+          );
+        }
       });
 
       this.redisConnection.on('close', () => {
         this.logger.warn('Conexión a Redis cerrada');
+        this.isRedisAvailable = false;
       });
 
-      // Intentar ping
+      // Conectar explícitamente y esperar
+      await this.redisConnection.connect();
+
+      // Intentar ping para verificar la conexión
       const pingResult = await this.redisConnection.ping();
       this.logger.log(`Redis ping exitoso: ${pingResult}`);
-      
+
       this.isRedisAvailable = true;
-      
+
       this.logger.log('Conectado a Redis exitosamente');
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      const errorMessage =
+        error instanceof Error ? error.message : 'Error desconocido';
       this.logger.error('Error completo al conectar a Redis:', errorMessage);
-      
-      if (error instanceof Error && error.message.includes('ECONNREFUSED')) {
-        this.logger.error('Redis no está disponible en la dirección especificada');
-      } else if (error instanceof Error && error.message.includes('WRONGPASS')) {
-        this.logger.error('Error de autenticación - verifica las credenciales de Redis');
+
+      if (error instanceof Error) {
+        if (error.message.includes('ECONNREFUSED')) {
+          this.logger.error(
+            'Redis no está disponible en la dirección especificada',
+          );
+        } else if (error.message.includes('WRONGPASS')) {
+          this.logger.error(
+            'Error de autenticación - verifica las credenciales de Redis',
+          );
+        } else if (error.message.includes('ENOTFOUND')) {
+          this.logger.error('No se puede resolver el hostname de Redis');
+        } else if (error.message.includes('ETIMEDOUT')) {
+          this.logger.error(
+            'Timeout de conexión - el servidor Redis no responde',
+          );
+        }
+
+        // Log adicional para debugging
+        this.logger.debug(`Stack trace: ${error.stack}`);
       }
-      
-      this.logger.warn('No se pudo conectar a Redis. Funcionando en modo sin colas.');
+
+      this.logger.warn(
+        'No se pudo conectar a Redis. Funcionando en modo sin colas.',
+      );
       this.isRedisAvailable = false;
-      
+
       if (this.redisConnection) {
         try {
           this.redisConnection.disconnect();
-        } catch {}
+        } catch {
+          // Ignorar errores al desconectar
+        }
         this.redisConnection = null;
       }
     }
@@ -226,18 +271,20 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
       // Verificar memoria del proceso Node.js
       const memUsage = process.memoryUsage();
       const heapUsedPercent = (memUsage.heapUsed / memUsage.heapTotal) * 100;
-      
+
       this.metrics.memoryUsage = heapUsedPercent;
 
       if (heapUsedPercent > WORKFLOW_CONFIG.MAX_MEMORY_USAGE_PERCENT) {
-        this.logger.warn(`⚠️ Uso de memoria alto: ${heapUsedPercent.toFixed(2)}%`);
-        
+        this.logger.warn(
+          `⚠️ Uso de memoria alto: ${heapUsedPercent.toFixed(2)}%`,
+        );
+
         // Forzar garbage collection si está disponible
         if (global.gc) {
           global.gc();
           this.logger.log('Garbage collection ejecutado');
         }
-        
+
         // Limpiar caches y datos antiguos
         await this.emergencyCleanup();
       }
@@ -248,19 +295,21 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
           const info = await this.redisConnection.info('memory');
           const usedMemoryMatch = info.match(/used_memory:(\d+)/);
           const usedMemoryHuman = info.match(/used_memory_human:([^\r\n]+)/);
-          
+
           if (usedMemoryHuman) {
             this.logger.debug(`Memoria Redis: ${usedMemoryHuman[1]}`);
           }
-          
+
           // Solo mostrar advertencia si tenemos valores para comparar
           if (usedMemoryMatch) {
             const usedBytes = parseInt(usedMemoryMatch[1]);
             // Considerar 1GB como límite de advertencia
             const warningThreshold = 1024 * 1024 * 1024; // 1GB
-            
+
             if (usedBytes > warningThreshold) {
-              this.logger.warn(`⚠️ Uso alto de memoria en Redis: ${usedMemoryHuman?.[1] || 'desconocido'}`);
+              this.logger.warn(
+                `⚠️ Uso alto de memoria en Redis: ${usedMemoryHuman?.[1] || 'desconocido'}`,
+              );
               await this.cleanupRedisData();
             }
           }
@@ -270,43 +319,56 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
         }
       }
     } catch (error) {
-      this.logger.error('Error verificando memoria:', error instanceof Error ? error.message : 'Error desconocido');
+      this.logger.error(
+        'Error verificando memoria:',
+        error instanceof Error ? error.message : 'Error desconocido',
+      );
     }
   }
 
   private async performCleanup() {
     try {
       this.logger.debug('Iniciando limpieza rutinaria...');
-      
+
       // 1. Limpiar jobs completados antiguos
-      for (const [queueName, queue] of this.queues) {
+      for (const [_queueName, queue] of this.queues) {
         try {
           const completed = await queue.getCompleted();
-          const toRemove = completed.filter(job => {
+          const toRemove = completed.filter((job) => {
             const age = Date.now() - job.finishedOn!;
             return age > WORKFLOW_CONFIG.JOB_REMOVE_ON_COMPLETE_AGE * 1000;
           });
-          
+
           for (const job of toRemove) {
             await job.remove();
             this.activeJobs.delete(job.id!);
           }
-          
+
           if (toRemove.length > 0) {
-            this.logger.debug(`Limpiados ${toRemove.length} jobs completados de ${queueName}`);
+            this.logger.debug(
+              `Limpiados ${toRemove.length} jobs completados de ${_queueName}`,
+            );
           }
         } catch (error) {
-          this.logger.error(`Error limpiando cola ${queueName}:`, error instanceof Error ? error.message : 'Error desconocido');
+          this.logger.error(
+            `Error limpiando cola ${_queueName}:`,
+            error instanceof Error ? error.message : 'Error desconocido',
+          );
         }
       }
 
       // 2. Limpiar ejecuciones antiguas de la BD
       const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - WORKFLOW_CONFIG.EXECUTION_RETENTION_DAYS);
-      
-      const deletedCount = await this.executionRepository.deleteOldExecutions(cutoffDate);
+      cutoffDate.setDate(
+        cutoffDate.getDate() - WORKFLOW_CONFIG.EXECUTION_RETENTION_DAYS,
+      );
+
+      const deletedCount =
+        await this.executionRepository.deleteOldExecutions(cutoffDate);
       if (deletedCount > 0) {
-        this.logger.log(`Eliminadas ${deletedCount} ejecuciones antiguas de la BD`);
+        this.logger.log(
+          `Eliminadas ${deletedCount} ejecuciones antiguas de la BD`,
+        );
       }
 
       // 3. Limpiar referencias a jobs activos que ya no existen
@@ -324,18 +386,25 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
 
       this.logger.debug('Limpieza rutinaria completada');
     } catch (error) {
-      this.logger.error('Error en limpieza rutinaria:', error instanceof Error ? error.message : 'Error desconocido');
+      this.logger.error(
+        'Error en limpieza rutinaria:',
+        error instanceof Error ? error.message : 'Error desconocido',
+      );
     }
   }
 
   private async emergencyCleanup() {
     this.logger.warn('Ejecutando limpieza de emergencia por memoria alta...');
-    
+
     try {
       // 1. Limpiar TODOS los jobs completados
-      for (const [queueName, queue] of this.queues) {
+      for (const [_queueName, queue] of this.queues) {
         await queue.clean(0, 1000, 'completed');
-        await queue.clean(WORKFLOW_CONFIG.JOB_REMOVE_ON_FAIL_AGE * 1000, 1000, 'failed');
+        await queue.clean(
+          WORKFLOW_CONFIG.JOB_REMOVE_ON_FAIL_AGE * 1000,
+          1000,
+          'failed',
+        );
       }
 
       // 2. Limpiar mapas internos
@@ -346,7 +415,10 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
 
       this.logger.log('Limpieza de emergencia completada');
     } catch (error) {
-      this.logger.error('Error en limpieza de emergencia:', error instanceof Error ? error.message : 'Error desconocido');
+      this.logger.error(
+        'Error en limpieza de emergencia:',
+        error instanceof Error ? error.message : 'Error desconocido',
+      );
     }
   }
 
@@ -356,39 +428,48 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
     try {
       // Limpiar keys antiguas de jobs completados
       const keys = await this.redisConnection.keys('bull:*:completed:*');
-      
+
       if (keys.length > 0) {
         // Eliminar en lotes de 100
         for (let i = 0; i < keys.length; i += 100) {
           const batch = keys.slice(i, i + 100);
           await this.redisConnection.del(...batch);
         }
-        
+
         this.logger.log(`Limpiadas ${keys.length} keys antiguas de Redis`);
       }
     } catch (error) {
-      this.logger.error('Error limpiando datos de Redis:', error instanceof Error ? error.message : 'Error desconocido');
+      this.logger.error(
+        'Error limpiando datos de Redis:',
+        error instanceof Error ? error.message : 'Error desconocido',
+      );
     }
   }
 
   private async stopWorkflowEngine() {
     this.logger.log('Deteniendo workflow engine...');
-    
+
     // Detener todos los workers primero
-    const workerPromises = Array.from(this.workers.values()).map(worker => 
-      worker.close().catch(err => this.logger.error('Error cerrando worker:', err))
+    const workerPromises = Array.from(this.workers.values()).map((worker) =>
+      worker
+        .close()
+        .catch((err) => this.logger.error('Error cerrando worker:', err)),
     );
     await Promise.all(workerPromises);
 
     // Cerrar eventos
-    const eventPromises = Array.from(this.queueEvents.values()).map(events =>
-      events.close().catch(err => this.logger.error('Error cerrando eventos:', err))
+    const eventPromises = Array.from(this.queueEvents.values()).map((events) =>
+      events
+        .close()
+        .catch((err) => this.logger.error('Error cerrando eventos:', err)),
     );
     await Promise.all(eventPromises);
 
     // Cerrar todas las colas
-    const queuePromises = Array.from(this.queues.values()).map(queue => 
-      queue.close().catch(err => this.logger.error('Error cerrando cola:', err))
+    const queuePromises = Array.from(this.queues.values()).map((queue) =>
+      queue
+        .close()
+        .catch((err) => this.logger.error('Error cerrando cola:', err)),
     );
     await Promise.all(queuePromises);
 
@@ -411,6 +492,12 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
 
   private registerWorkflow(workflow: WorkflowDefinition) {
     this.workflows.set(workflow.id, workflow);
+    this.logger.log(
+      `📝 Registrando workflow: ${workflow.id} con ${workflow.steps.size} pasos`,
+    );
+    this.logger.debug(
+      `Pasos del workflow ${workflow.id}: ${Array.from(workflow.steps.keys()).join(', ')}`,
+    );
 
     if (!this.isRedisAvailable || !this.redisConnection) {
       this.logger.warn(`Workflow ${workflow.id} registrado en modo sin colas`);
@@ -420,6 +507,7 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
     // Crear cola para cada paso del workflow
     for (const [stepId, step] of workflow.steps) {
       const queueName = `${workflow.id}-${stepId}`;
+      this.logger.debug(`🗂️ Creando cola: ${queueName} para paso: ${stepId}`);
 
       // Crear cola con conexión a Redis y configuración optimizada
       const queue = new Queue(queueName, {
@@ -476,20 +564,24 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
         queueName,
         async (job: Job) => {
           const startTime = Date.now();
-          
+
           try {
             // Registrar job activo
             this.activeJobs.set(job.id!, job);
             this.metrics.activeWorkers++;
 
-            this.logger.log(`Ejecutando paso ${stepId} del workflow ${workflow.id} - Job: ${job.id}`);
+            this.logger.log(
+              `Ejecutando paso ${stepId} del workflow ${workflow.id} - Job: ${job.id}`,
+            );
 
             // Actualizar estado en BD
-            const execution = await this.executionRepository.findByJobId(job.id!);
+            const execution = await this.executionRepository.findByJobId(
+              job.id!,
+            );
             if (execution) {
               await this.executionRepository.update(execution.id, {
                 status: 'running',
-                outputData: { 
+                outputData: {
                   ...execution.outputData,
                   currentStep: stepId,
                   lastUpdate: new Date(),
@@ -500,9 +592,9 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
             // Ejecutar el handler del paso con timeout
             const result = await this.executeWithTimeout(
               step.handler(job.data),
-              step.timeout || 300000 // 5 minutos por defecto
+              step.timeout || 300000, // 5 minutos por defecto
             );
-            
+
             // Actualizar progreso en BD
             if (execution) {
               const updateData: any = {
@@ -513,11 +605,11 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
                   processingTime: Date.now() - startTime,
                 },
               };
-              
+
               if (result._workflowActive !== false) {
                 updateData.status = 'running';
               }
-              
+
               await this.executionRepository.update(execution.id, updateData);
             }
 
@@ -532,10 +624,12 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
                   result,
                   {
                     delay: step.delay || 0,
-                  }
+                  },
                 );
-                
-                this.logger.log(`Siguiente paso agregado: ${step.nextStep}, Job ID: ${nextJob.id}`);
+
+                this.logger.log(
+                  `Siguiente paso agregado: ${step.nextStep}, Job ID: ${nextJob.id}`,
+                );
               }
             } else if (!step.nextStep || result._workflowCompleted === true) {
               // Workflow completado - limpiar datos
@@ -550,7 +644,9 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
                 setTimeout(async () => {
                   try {
                     await job.remove();
-                    this.logger.debug(`Job ${job.id} removido después de completar`);
+                    this.logger.debug(
+                      `Job ${job.id} removido después de completar`,
+                    );
                   } catch (error) {
                     // Job ya fue removido
                   }
@@ -562,11 +658,14 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
           } catch (error) {
             this.logger.error(`Error en paso ${stepId}:`, error);
 
-            const execution = await this.executionRepository.findByJobId(job.id!);
+            const execution = await this.executionRepository.findByJobId(
+              job.id!,
+            );
             if (execution) {
               await this.executionRepository.update(execution.id, {
                 status: 'failed',
-                error: error instanceof Error ? error.message : 'Error desconocido',
+                error:
+                  error instanceof Error ? error.message : 'Error desconocido',
               });
             }
 
@@ -606,14 +705,22 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
       });
 
       this.workers.set(queueName, worker);
+      this.logger.log(`✅ Worker creado para cola: ${queueName}`);
     }
+
+    this.logger.log(
+      `🎯 Workflow ${workflow.id} completamente configurado con ${workflow.steps.size} colas y workers`,
+    );
   }
 
-  private async executeWithTimeout<T>(promise: Promise<T>, timeout: number): Promise<T> {
+  private async executeWithTimeout<T>(
+    promise: Promise<T>,
+    timeout: number,
+  ): Promise<T> {
     return Promise.race([
       promise,
-      new Promise<T>((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout de ejecución')), timeout)
+      new Promise<T>((_, reject) =>
+        setTimeout(() => reject(new Error('Timeout de ejecución')), timeout),
       ),
     ]);
   }
@@ -629,7 +736,7 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
       // Verificar memoria antes de iniciar
       const memUsage = process.memoryUsage();
       const heapUsedPercent = (memUsage.heapUsed / memUsage.heapTotal) * 100;
-      
+
       if (heapUsedPercent > WORKFLOW_CONFIG.MAX_MEMORY_USAGE_PERCENT) {
         throw new Error('Sistema con memoria alta. Intente más tarde.');
       }
@@ -651,11 +758,22 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
       }
 
       const startQueueName = `${workflowId}-${workflow.startStep}`;
+      this.logger.log(`🎬 Buscando cola de inicio: ${startQueueName}`);
+      this.logger.debug(
+        `Colas disponibles: ${Array.from(this.queues.keys()).join(', ')}`,
+      );
+
       const startQueue = this.queues.get(startQueueName);
 
       if (!startQueue) {
+        this.logger.error(`❌ Cola de inicio no encontrada: ${startQueueName}`);
+        this.logger.error(
+          `Colas registradas: ${Array.from(this.queues.keys()).join(', ')}`,
+        );
         throw new Error(`Cola de inicio no encontrada: ${startQueueName}`);
       }
+
+      this.logger.log(`✅ Cola de inicio encontrada: ${startQueueName}`);
 
       // Verificar tamaño de la cola
       const queueSize = await startQueue.count();
@@ -663,13 +781,9 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
         throw new Error(`Cola saturada: ${queueSize} jobs en espera`);
       }
 
-      const job = await startQueue.add(
-        `start-${workflow.startStep}`,
-        data,
-        {
-          priority: 1,
-        }
-      );
+      const job = await startQueue.add(`start-${workflow.startStep}`, data, {
+        priority: 1,
+      });
 
       const execution = await this.executionRepository.create({
         workflowId,
@@ -678,8 +792,10 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
         inputData: data,
       });
 
-      this.logger.log(`Workflow iniciado: ${workflowId}, job: ${job.id}, execution: ${execution.id}`);
-      
+      this.logger.log(
+        `Workflow iniciado: ${workflowId}, job: ${job.id}, execution: ${execution.id}`,
+      );
+
       return execution.id;
     } catch (error) {
       this.logger.error(`Error al iniciar workflow ${workflowId}:`, error);
@@ -702,7 +818,7 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (this.isRedisAvailable && execution.jobId) {
-        for (const [queueName, queue] of this.queues) {
+        for (const [_queueName, queue] of this.queues) {
           const job = await queue.getJob(execution.jobId);
           if (job) {
             const state = await job.getState();
@@ -730,7 +846,10 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
 
       return this.mapExecutionToStatus(execution);
     } catch (error) {
-      this.logger.error(`Error obteniendo estado del workflow ${executionId}:`, error);
+      this.logger.error(
+        `Error obteniendo estado del workflow ${executionId}:`,
+        error,
+      );
       throw error;
     }
   }
@@ -839,18 +958,18 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
 
     try {
       // Encontrar y eliminar todos los jobs relacionados
-      for (const [queueName, queue] of this.queues) {
+      for (const [_queueName, queue] of this.queues) {
         const job = await queue.getJob(execution.jobId);
         if (job) {
           // Eliminar job inmediatamente
           await job.remove();
           this.activeJobs.delete(job.id!);
-          
+
           await this.executionRepository.update(execution.id, {
             status: 'cancelled',
             completedAt: new Date(),
           });
-          
+
           this.logger.log(`Workflow terminado y limpiado: ${executionId}`);
           return;
         }
@@ -908,11 +1027,11 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
       }
 
       data = await step.handler(data);
-      
+
       if (data._workflowCompleted === true || data._workflowActive === false) {
         break;
       }
-      
+
       currentStep = step.nextStep || '';
       stepCount++;
     }
@@ -965,7 +1084,7 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
     const totalWorkers = this.workers.size;
     const maxThroughput = totalWorkers * WORKFLOW_CONFIG.WORKER_CONCURRENCY;
     const memUsage = process.memoryUsage();
-    
+
     return {
       configuration: {
         workerConcurrency: WORKFLOW_CONFIG.WORKER_CONCURRENCY,
@@ -994,7 +1113,9 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
       metrics: this.metrics,
       capacity: {
         message: `Sistema puede procesar hasta ${maxThroughput} jobs en paralelo`,
-        perWorkflowCapacity: WORKFLOW_CONFIG.WORKER_CONCURRENCY * WORKFLOW_CONFIG.MAX_WORKERS_PER_WORKFLOW,
+        perWorkflowCapacity:
+          WORKFLOW_CONFIG.WORKER_CONCURRENCY *
+          WORKFLOW_CONFIG.MAX_WORKERS_PER_WORKFLOW,
       },
     };
   }

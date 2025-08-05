@@ -49,7 +49,10 @@ export class ConfigService {
       entities: [__dirname + '/../../**/*.entity{.ts,.js}'],
       synchronize: process.env.NODE_ENV !== 'production',
       logging: this.getLoggingConfig(),
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+      ssl:
+        process.env.NODE_ENV === 'production'
+          ? { rejectUnauthorized: false }
+          : false,
     };
   }
 

@@ -15,7 +15,7 @@ import { CustomTypeOrmLogger } from './common/services/typeorm-logger.service';
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => {
         const config = configService.databaseConfig;
-        
+
         // Solo usar el logger personalizado si está habilitado el logging
         if (configService.logSql || configService.logSqlErrorOnly) {
           return {
@@ -26,7 +26,7 @@ import { CustomTypeOrmLogger } from './common/services/typeorm-logger.service';
             ),
           };
         }
-        
+
         return config;
       },
       inject: [ConfigService],

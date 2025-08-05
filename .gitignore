@@ -56,3 +56,9 @@ pnpm-lock.yaml
 
 # pnpm store
 .pnpm-store/
+
+# Bull Board Dashboard
+bull-board-dashboard/node_modules/
+bull-board-dashboard/.env
+bull-board-dashboard/logs/
+bull-board-dashboard/*.log

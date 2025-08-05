@@ -23,9 +23,12 @@ export class WorkflowExecutionRepository {
     return await this.repository.findOne({ where: { jobId } });
   }
 
-  async update(id: string, data: Partial<WorkflowExecution>): Promise<WorkflowExecution> {
+  async update(
+    id: string,
+    data: Partial<WorkflowExecution>,
+  ): Promise<WorkflowExecution> {
     await this.repository.update(id, data);
-    return await this.findById(id) as WorkflowExecution;
+    return (await this.findById(id)) as WorkflowExecution;
   }
 
   async findAll(): Promise<WorkflowExecution[]> {
@@ -47,11 +50,11 @@ export class WorkflowExecutionRepository {
       .createQueryBuilder()
       .delete()
       .where('createdAt < :cutoffDate', { cutoffDate })
-      .andWhere('status IN (:...statuses)', { 
-        statuses: ['completed', 'failed', 'cancelled'] 
+      .andWhere('status IN (:...statuses)', {
+        statuses: ['completed', 'failed', 'cancelled'],
       })
       .execute();
-    
+
     return result.affected || 0;
   }
 
@@ -60,8 +63,8 @@ export class WorkflowExecutionRepository {
       where: [
         { status: 'running' },
         { status: 'pending' },
-        { status: 'active' }
-      ]
+        { status: 'active' },
+      ],
     });
   }
 }
