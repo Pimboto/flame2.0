@@ -6,15 +6,8 @@ import {
 } from '@nestjs/common';
 import { Queue, Worker, Job, QueueEvents } from 'bullmq';
 import IORedis from 'ioredis';
-import {
-  sampleWorkflowDefinition,
-  errorHandlingWorkflowDefinition,
-  WorkflowDefinition,
-} from '../domain/workflows/sample.workflow';
-import {
-  loopWorkflowDefinition,
-  conditionalLoopWorkflow,
-} from '../domain/workflows/examples/loop-workflows';
+import { WorkflowDefinition } from '../domain/workflows/sample.workflow';
+import { safeAutomationWorkflow } from '../domain/workflows/examples/safe-automation-workflow';
 import { ConfigService } from '../common/services/config.service';
 import { WorkflowExecutionRepository } from './repositories/workflow-execution.repository';
 import { WorkflowExecution } from '../domain/entities/workflow-execution.entity';
@@ -92,11 +85,8 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
     try {
       await this.connectToRedis();
 
-      // Registrar workflows predefinidos
-      this.registerWorkflow(sampleWorkflowDefinition);
-      this.registerWorkflow(errorHandlingWorkflowDefinition);
-      this.registerWorkflow(loopWorkflowDefinition);
-      this.registerWorkflow(conditionalLoopWorkflow);
+      // Registrar solo el workflow seguro de automatización
+      this.registerWorkflow(safeAutomationWorkflow);
 
       this.logger.log('Workflow engine iniciado exitosamente');
       this.logger.log(
@@ -574,10 +564,17 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
               `Ejecutando paso ${stepId} del workflow ${workflow.id} - Job: ${job.id}`,
             );
 
-            // Actualizar estado en BD
-            const execution = await this.executionRepository.findByJobId(
-              job.id!,
-            );
+            // Actualizar estado en BD - buscar por executionId en los datos
+            let execution: WorkflowExecution | null = null;
+            if (job.data.executionId) {
+              execution = await this.executionRepository.findById(
+                job.data.executionId,
+              );
+            } else {
+              // Si no hay executionId, buscar por jobId (primera vez)
+              execution = await this.executionRepository.findByJobId(job.id!);
+            }
+
             if (execution) {
               await this.executionRepository.update(execution.id, {
                 status: 'running',
@@ -595,6 +592,11 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
               step.timeout || 300000, // 5 minutos por defecto
             );
 
+            // Asegurar que el executionId se propague
+            if (execution) {
+              result.executionId = execution.id;
+            }
+
             // Actualizar progreso en BD
             if (execution) {
               const updateData: any = {
@@ -608,6 +610,10 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
 
               if (result._workflowActive !== false) {
                 updateData.status = 'running';
+              } else if (result._workflowCompleted === true) {
+                updateData.status = 'completed';
+              } else if (result.status === 'stopped') {
+                updateData.status = 'stopped';
               }
 
               await this.executionRepository.update(execution.id, updateData);
@@ -781,15 +787,27 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
         throw new Error(`Cola saturada: ${queueSize} jobs en espera`);
       }
 
-      const job = await startQueue.add(`start-${workflow.startStep}`, data, {
+      // Primero crear la ejecución
+      const execution = await this.executionRepository.create({
+        workflowId,
+        jobId: 'pending', // Se actualizará con el job real
+        status: 'pending',
+        inputData: data,
+      });
+
+      // Agregar executionId a los datos
+      const jobData = {
+        ...data,
+        executionId: execution.id,
+      };
+
+      const job = await startQueue.add(`start-${workflow.startStep}`, jobData, {
         priority: 1,
       });
 
-      const execution = await this.executionRepository.create({
-        workflowId,
+      // Actualizar con el jobId real
+      await this.executionRepository.update(execution.id, {
         jobId: job.id!,
-        status: 'pending',
-        inputData: data,
       });
 
       this.logger.log(
@@ -817,34 +835,34 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
         return null;
       }
 
-      if (this.isRedisAvailable && execution.jobId) {
-        for (const [_queueName, queue] of this.queues) {
-          const job = await queue.getJob(execution.jobId);
-          if (job) {
-            const state = await job.getState();
+      // Siempre devolver el estado más actualizado de la BD
+      const outputData = execution.outputData || {};
+      const inputData = execution.inputData || {};
 
-            if (state !== execution.status) {
-              await this.executionRepository.update(execution.id, {
-                status: this.mapJobStateToStatus(state),
-              });
-            }
+      // Combinar datos de entrada y salida para el estado completo
+      const fullData = {
+        ...inputData,
+        ...outputData,
+      };
 
-            return {
-              id: execution.id,
-              jobId: execution.jobId,
-              workflowId: execution.workflowId,
-              status: state,
-              data: execution.outputData || execution.inputData,
-              progress: job.progress,
-              createTime: execution.createdAt,
-              processedOn: job.processedOn ? new Date(job.processedOn) : null,
-              finishedOn: execution.completedAt,
-            };
-          }
-        }
-      }
-
-      return this.mapExecutionToStatus(execution);
+      return {
+        id: execution.id,
+        jobId: execution.jobId,
+        workflowId: execution.workflowId,
+        status: execution.status,
+        data: fullData,
+        currentStep: outputData.currentStep || 'initialize',
+        iteration: fullData.iteration || 0,
+        messages: fullData.messages || [],
+        history: fullData.history || [],
+        createTime: execution.createdAt,
+        lastUpdate: outputData.lastUpdate || execution.updatedAt,
+        finishedOn: execution.completedAt,
+        error: execution.error,
+        // Información adicional para workflows con loops
+        isLooping: execution.workflowId === 'safe-automation-workflow',
+        progress: this.calculateProgress(fullData, execution.workflowId),
+      };
     } catch (error) {
       this.logger.error(
         `Error obteniendo estado del workflow ${executionId}:`,
@@ -852,6 +870,16 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
       );
       throw error;
     }
+  }
+
+  private calculateProgress(data: any, workflowId: string): string {
+    if (workflowId === 'safe-automation-workflow') {
+      const iteration = data.iteration || 0;
+      const maxIterations = data.maxIterations || 10;
+      const percentage = Math.min((iteration / maxIterations) * 100, 100);
+      return `${percentage.toFixed(0)}% (Iteración ${iteration}/${maxIterations})`;
+    }
+    return 'N/A';
   }
 
   private mapExecutionToStatus(execution: WorkflowExecution): any {

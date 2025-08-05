@@ -17,7 +17,13 @@ export default [
       '*.cjs',
       '**/*.spec.ts',
       '**/*.e2e-spec.ts',
-      'test/**'
+      'test/**',
+      'cleanup-workflows.ts',
+      'emergency-stop.ts',
+      'monitor-redis.ts',
+      'fix-execution-states.ts',
+      'set-logs.js',
+      'test-redis.ts'
     ],
   },
   {

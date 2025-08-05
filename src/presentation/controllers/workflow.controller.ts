@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { WorkflowService } from '../../application/services/workflow.service';
 import { ExecuteWorkflowDto } from '../dto/execute-workflow.dto';
+import { createSafeWorkflowTestData } from '../../domain/workflows/examples/safe-automation-workflow';
 
 @Controller('workflows')
 export class WorkflowController {
@@ -87,5 +88,74 @@ export class WorkflowController {
   async forceCleanup() {
     this.logger.log('Ejecutando limpieza manual del sistema');
     return await this.workflowService.forceCleanup();
+  }
+
+  // Endpoint especial para probar el workflow seguro
+  @Post('safe-automation/test')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async testSafeAutomationWorkflow(@Body() body?: { maxIterations?: number }) {
+    this.logger.log('Iniciando prueba del workflow de automatización segura');
+
+    const testData = createSafeWorkflowTestData(body?.maxIterations);
+
+    const result = await this.workflowService.executeWorkflow({
+      workflowId: 'safe-automation-workflow',
+      data: testData,
+    });
+
+    return {
+      message: 'Workflow de automatización segura iniciado',
+      description:
+        'El workflow se detendrá en la 3ra iteración automáticamente',
+      executionId: result.instanceId,
+      testData,
+      steps: [
+        '1. Inicializar workflow',
+        '2. Verificar condición (API check)',
+        '3. Esperar 20 segundos',
+        '4. Verificar condición nuevamente',
+        '5. Ejecutar acción (Hello World)',
+        '6. Decidir siguiente paso y volver al paso 2',
+        'NOTA: Se detendrá automáticamente en la 3ra iteración',
+      ],
+    };
+  }
+
+  // Endpoint para obtener el estado detallado del workflow seguro
+  @Get('safe-automation/status/:instanceId')
+  async getSafeWorkflowStatus(@Param('instanceId') instanceId: string) {
+    this.logger.log(
+      `Obteniendo estado detallado del workflow seguro: ${instanceId}`,
+    );
+
+    const status = await this.workflowService.getWorkflowStatus(instanceId);
+
+    if (!status) {
+      return {
+        error: 'Workflow no encontrado',
+        instanceId,
+      };
+    }
+
+    return {
+      ...status,
+      interpretation: this.interpretSafeWorkflowStatus(status),
+    };
+  }
+
+  private interpretSafeWorkflowStatus(status: any): any {
+    const data = status.data || {};
+
+    return {
+      currentIteration: data.iteration || 0,
+      isRunning: status.status === 'active' || status.status === 'running',
+      wasStopped: data.status === 'stopped',
+      stopReason: data.stopReason,
+      messages: data.messages || [],
+      history: data.history || [],
+      startedAt: data.startedAt,
+      stoppedAt: data.stoppedAt,
+      completedAt: data.completedAt,
+    };
   }
 }

@@ -51,13 +51,7 @@ export class WorkflowService {
         );
       }
 
-      return {
-        instanceId,
-        status: status.status,
-        data: status.data,
-        createTime: status.createTime,
-        completeTime: status.completeTime,
-      };
+      return status; // Devolver todo el estado detallado
     } catch (error) {
       this.logger.error(
         `Error obteniendo estado del workflow ${instanceId}:`,
@@ -141,27 +135,10 @@ export class WorkflowService {
     return {
       workflows: [
         {
-          id: 'sample-workflow',
-          name: 'Sample Workflow',
-          description: 'Workflow de ejemplo con procesamiento de datos',
-          version: 1,
-        },
-        {
-          id: 'error-handling-workflow',
-          name: 'Error Handling Workflow',
-          description: 'Workflow con manejo de errores y compensación',
-          version: 1,
-        },
-        {
-          id: 'loop-workflow',
-          name: 'Loop Workflow with Waits',
-          description: 'Workflow con loop infinito y esperas de 20 segundos',
-          version: 1,
-        },
-        {
-          id: 'conditional-loop',
-          name: 'Conditional Loop Workflow',
-          description: 'Workflow con rutas condicionales y loops',
+          id: 'safe-automation-workflow',
+          name: 'Safe Automation Workflow',
+          description:
+            'Workflow seguro con múltiples puntos de control y detención automática',
           version: 1,
         },
       ],
@@ -211,12 +188,7 @@ export class WorkflowService {
 
   private isValidWorkflowId(workflowId: string): boolean {
     // Por ahora validamos contra una lista hardcodeada
-    const validWorkflows = [
-      'sample-workflow',
-      'error-handling-workflow',
-      'loop-workflow',
-      'conditional-loop',
-    ];
+    const validWorkflows = ['safe-automation-workflow'];
     return validWorkflows.includes(workflowId);
   }
 }
