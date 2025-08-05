@@ -18,7 +18,7 @@ export class AccountRepository implements IAccountRepository {
   }
 
   async saveMany(accounts: Account[]): Promise<void> {
-    const accountEntities = accounts.map(account => this.toEntity(account));
+    const accountEntities = accounts.map((account) => this.toEntity(account));
     await this.accountRepository.save(accountEntities);
   }
 
@@ -28,13 +28,15 @@ export class AccountRepository implements IAccountRepository {
   }
 
   async findByExternalId(externalId: string): Promise<Account | null> {
-    const entity = await this.accountRepository.findOne({ where: { externalId } });
+    const entity = await this.accountRepository.findOne({
+      where: { externalId },
+    });
     return entity ? this.toDomain(entity) : null;
   }
 
   async findAll(): Promise<Account[]> {
     const entities = await this.accountRepository.find();
-    return entities.map(entity => this.toDomain(entity));
+    return entities.map((entity) => this.toDomain(entity));
   }
 
   async delete(id: string): Promise<void> {
@@ -43,7 +45,7 @@ export class AccountRepository implements IAccountRepository {
 
   private toEntity(account: Account): AccountEntity {
     const plainObject = account.toPlainObject();
-    
+
     const entity = new AccountEntity();
     entity.id = plainObject.id;
     entity.externalId = plainObject.externalId;
@@ -63,7 +65,7 @@ export class AccountRepository implements IAccountRepository {
     entity.status = plainObject.status;
     entity.createdAt = plainObject.createdAt;
     entity.updatedAt = plainObject.updatedAt;
-    
+
     return entity;
   }
 

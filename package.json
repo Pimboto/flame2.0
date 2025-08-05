@@ -22,7 +22,14 @@
     "cleanup:workflows": "ts-node cleanup-workflows.ts",
     "emergency:stop": "ts-node emergency-stop.ts",
     "monitor:redis": "ts-node monitor-redis.ts",
-    "fix:states": "ts-node fix-execution-states.ts"
+    "fix:states": "ts-node fix-execution-states.ts",
+    "migrate": "ts-node scripts/migrate-database.ts",
+    "migrate:rollback": "ts-node scripts/rollback-database.ts",
+    "db:backup": "pg_dump $DATABASE_URL > backup_$(date +%Y%m%d_%H%M%S).sql",
+    "db:restore": "psql $DATABASE_URL < $1",
+    "check:architecture": "ts-node scripts/check-architecture.ts",
+    "generate:docs": "typedoc --out docs src",
+    "health:check": "curl -f http://localhost:3000/api/v1/workflows || exit 1"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",

@@ -8,11 +8,15 @@ import { Queue, Worker, Job, QueueEvents } from 'bullmq';
 import IORedis from 'ioredis';
 import { WorkflowDefinition } from '../domain/workflows/sample.workflow';
 import { safeAutomationWorkflow } from '../domain/workflows/examples/safe-automation-workflow';
-import { importAccountsWorkflow } from '../domain/workflows/import-accounts-workflow';
+import { createImportAccountsWorkflow } from '../domain/workflows/import-accounts-workflow';
+import { TinderApiService } from './services/tinder-api.service';
+import { AccountRepository } from './repositories/account.repository';
 import { ConfigService } from '../common/services/config.service';
 import { WorkflowExecutionRepository } from './repositories/workflow-execution.repository';
-import { WorkflowExecution } from '../domain/entities/workflow-execution.entity';
-import { AccountRepository } from './repositories/account.repository';
+import {
+  WorkflowExecution,
+  WorkflowExecutionStatus,
+} from '../domain/entities/workflow-execution';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 // Configuración de concurrencia y performance
@@ -81,6 +85,7 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
     private readonly executionRepository: WorkflowExecutionRepository,
     private readonly accountRepository: AccountRepository,
+    private readonly tinderApiService: TinderApiService,
   ) {
     WorkflowEngineService.instance = this;
   }
@@ -103,7 +108,12 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
 
       // Registrar workflows disponibles
       this.registerWorkflow(safeAutomationWorkflow);
-      this.registerWorkflow(importAccountsWorkflow);
+      const importWorkflow = createImportAccountsWorkflow(
+        this.tinderApiService,
+        this.accountRepository,
+        this.logger,
+      );
+      this.registerWorkflow(importWorkflow);
 
       this.logger.log('Workflow engine iniciado exitosamente');
       this.logger.log(
@@ -593,14 +603,17 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
             }
 
             if (execution) {
-              await this.executionRepository.update(execution.id, {
-                status: 'running',
-                outputData: {
-                  ...execution.outputData,
-                  currentStep: stepId,
-                  lastUpdate: new Date(),
+              await this.executionRepository.updateById(
+                execution.id.toString(),
+                {
+                  status: 'running',
+                  outputData: {
+                    ...execution.outputData,
+                    currentStep: stepId,
+                    lastUpdate: new Date(),
+                  },
                 },
-              });
+              );
             }
 
             // Ejecutar el handler del paso con timeout
@@ -633,7 +646,10 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
                 updateData.status = 'stopped';
               }
 
-              await this.executionRepository.update(execution.id, updateData);
+              await this.executionRepository.updateById(
+                execution.id.toString(),
+                updateData,
+              );
             }
 
             // Determinar el siguiente paso - priorizar _nextStep del resultado sobre step.nextStep
@@ -660,11 +676,14 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
             } else if (!nextStepName || result._workflowCompleted === true) {
               // Workflow completado - limpiar datos
               if (execution) {
-                await this.executionRepository.update(execution.id, {
-                  status: 'completed',
-                  outputData: result,
-                  completedAt: new Date(),
-                });
+                await this.executionRepository.updateById(
+                  execution.id.toString(),
+                  {
+                    status: 'completed',
+                    outputData: result,
+                    completedAt: new Date(),
+                  },
+                );
 
                 // Programar limpieza del job completado
                 setTimeout(async () => {
@@ -688,11 +707,16 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
               job.id!,
             );
             if (execution) {
-              await this.executionRepository.update(execution.id, {
-                status: 'failed',
-                error:
-                  error instanceof Error ? error.message : 'Error desconocido',
-              });
+              await this.executionRepository.updateById(
+                execution.id.toString(),
+                {
+                  status: 'failed',
+                  error:
+                    error instanceof Error
+                      ? error.message
+                      : 'Error desconocido',
+                },
+              );
             }
 
             throw error;
@@ -771,16 +795,16 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
         this.logger.warn('Ejecutando workflow sin colas (Redis no disponible)');
         const result = await this.executeWorkflowSync(workflowId, data);
 
-        const execution = await this.executionRepository.create({
+        const execution = WorkflowExecution.create(
           workflowId,
-          jobId: result.instanceId,
-          status: 'completed',
-          inputData: data,
-          outputData: result.data,
-          completedAt: result.completedAt,
-        });
+          result.instanceId,
+          data,
+        );
+        execution.complete(result.data);
 
-        return execution.id;
+        const savedExecution = await this.executionRepository.create(execution);
+
+        return savedExecution.id.toString();
       }
 
       const startQueueName = `${workflowId}-${workflow.startStep}`;
@@ -808,17 +832,17 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
       }
 
       // Primero crear la ejecución
-      const execution = await this.executionRepository.create({
+      const execution = WorkflowExecution.create(
         workflowId,
-        jobId: 'pending', // Se actualizará con el job real
-        status: 'pending',
-        inputData: data,
-      });
+        'pending', // jobId temporal
+        data,
+      );
+      const savedExecution = await this.executionRepository.create(execution);
 
       // Agregar executionId a los datos
       const jobData = {
         ...data,
-        executionId: execution.id,
+        executionId: savedExecution.id.toString(),
       };
 
       const job = await startQueue.add(`start-${workflow.startStep}`, jobData, {
@@ -826,15 +850,15 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
       });
 
       // Actualizar con el jobId real
-      await this.executionRepository.update(execution.id, {
+      await this.executionRepository.updateById(savedExecution.id.toString(), {
         jobId: job.id!,
       });
 
       this.logger.log(
-        `Workflow iniciado: ${workflowId}, job: ${job.id}, execution: ${execution.id}`,
+        `Workflow iniciado: ${workflowId}, job: ${job.id}, execution: ${savedExecution.id.toString()}`,
       );
 
-      return execution.id;
+      return savedExecution.id.toString();
     } catch (error) {
       this.logger.error(`Error al iniciar workflow ${workflowId}:`, error);
       throw error;
@@ -866,7 +890,7 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
       };
 
       return {
-        id: execution.id,
+        id: execution.id.toString(),
         jobId: execution.jobId,
         workflowId: execution.workflowId,
         status: execution.status,
@@ -904,7 +928,7 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
 
   private mapExecutionToStatus(execution: WorkflowExecution): any {
     return {
-      id: execution.id,
+      id: execution.id.toString(),
       jobId: execution.jobId,
       workflowId: execution.workflowId,
       status: execution.status,
@@ -946,7 +970,7 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
         const job = await queue.getJob(execution.jobId);
         if (job) {
           await queue.pause();
-          await this.executionRepository.update(execution.id, {
+          await this.executionRepository.updateById(execution.id.toString(), {
             status: 'cancelled',
           });
           this.logger.log(`Workflow suspendido: ${executionId}`);
@@ -976,7 +1000,7 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
         const job = await queue.getJob(execution.jobId);
         if (job) {
           await queue.resume();
-          await this.executionRepository.update(execution.id, {
+          await this.executionRepository.updateById(execution.id.toString(), {
             status: 'running',
           });
           this.logger.log(`Workflow reanudado: ${executionId}`);
@@ -997,7 +1021,7 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (!this.isRedisAvailable) {
-      await this.executionRepository.update(execution.id, {
+      await this.executionRepository.updateById(execution.id.toString(), {
         status: 'cancelled',
         completedAt: new Date(),
       });
@@ -1013,7 +1037,7 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
           await job.remove();
           this.activeJobs.delete(job.id!);
 
-          await this.executionRepository.update(execution.id, {
+          await this.executionRepository.updateById(execution.id.toString(), {
             status: 'cancelled',
             completedAt: new Date(),
           });
@@ -1031,18 +1055,18 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
   async testWorkflow(workflowId: string, testData: any): Promise<any> {
     const result = await this.executeWorkflowSync(workflowId, testData);
 
-    const execution = await this.executionRepository.create({
+    const execution = WorkflowExecution.create(
       workflowId,
-      jobId: result.instanceId,
-      status: 'completed',
-      inputData: testData,
-      outputData: result.data,
-      completedAt: result.completedAt,
-    });
+      result.instanceId,
+      testData,
+    );
+    execution.complete(result.data);
+
+    const savedExecution = await this.executionRepository.create(execution);
 
     return {
       ...result,
-      executionId: execution.id,
+      executionId: savedExecution.id.toString(),
     };
   }
 
