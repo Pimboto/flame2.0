@@ -1,8 +1,11 @@
+// src/infrastructure/repositories/account.repository.ts
+// ACTUALIZADO - Para usar la interface correcta
+
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { Account } from '../../domain/entities/account.entity';
-import { IAccountRepository } from '../../domain/repositories/account.repository.interface';
+import { IAccountRepository } from '../../domain/interfaces/account.repository.interface';
 import { AccountEntity } from '../entities/account.entity';
 
 @Injectable()
@@ -34,13 +37,40 @@ export class AccountRepository implements IAccountRepository {
     return entity ? this.toDomain(entity) : null;
   }
 
+  async findByExternalIds(externalIds: string[]): Promise<Account[]> {
+    const entities = await this.accountRepository.find({
+      where: { externalId: In(externalIds) },
+    });
+    return entities.map((entity) => this.toDomain(entity));
+  }
+
   async findAll(): Promise<Account[]> {
     const entities = await this.accountRepository.find();
     return entities.map((entity) => this.toDomain(entity));
   }
 
+  async findByStatus(status: string): Promise<Account[]> {
+    const entities = await this.accountRepository.find({
+      where: { status },
+    });
+    return entities.map((entity) => this.toDomain(entity));
+  }
+
+  async update(id: string, updateData: Partial<Account>): Promise<void> {
+    await this.accountRepository.update(id, updateData as any);
+  }
+
   async delete(id: string): Promise<void> {
     await this.accountRepository.delete(id);
+  }
+
+  async count(): Promise<number> {
+    return await this.accountRepository.count();
+  }
+
+  async exists(id: string): Promise<boolean> {
+    const count = await this.accountRepository.count({ where: { id } });
+    return count > 0;
   }
 
   private toEntity(account: Account): AccountEntity {
@@ -70,15 +100,16 @@ export class AccountRepository implements IAccountRepository {
   }
 
   private toDomain(entity: AccountEntity): Account {
-    return Account.create(
-      entity.externalId,
-      entity.accountString,
-      entity.accountOrigin,
-      {
+    return Account.fromData({
+      id: entity.id,
+      externalId: entity.externalId,
+      accountString: entity.accountString,
+      accountOrigin: entity.accountOrigin,
+      classInfo: {
         classType: entity.classType,
         classColor: entity.classColor,
       },
-      {
+      generalInformation: {
         name: entity.name,
         age: entity.age,
         phone: entity.phone,
@@ -88,10 +119,12 @@ export class AccountRepository implements IAccountRepository {
         location: entity.location,
         isVerified: entity.isVerified,
       },
-      {
+      proxy: {
         https: entity.proxyHttps,
       },
-      entity.status,
-    );
+      status: entity.status,
+      createdAt: entity.createdAt,
+      updatedAt: entity.updatedAt,
+    });
   }
 }

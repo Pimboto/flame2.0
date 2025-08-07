@@ -1,7 +1,7 @@
-import { WorkflowDefinition } from '../sample.workflow';
-import { logger } from '../../../common/services/logger.service';
+// src/domain/workflows/examples/loop-workflows.ts
 
-// Workflow con loop infinito y waits
+import { WorkflowDefinition } from '../sample.workflow';
+
 export const loopWorkflowDefinition: WorkflowDefinition = {
   id: 'loop-workflow',
   name: 'Loop Workflow with Waits',
@@ -12,25 +12,24 @@ export const loopWorkflowDefinition: WorkflowDefinition = {
       'initial-wait',
       {
         name: 'Initial Wait',
-        handler: async (data) => {
-          logger.log(
+        handler: async (context) => {
+          context.logger.log(
             '🕐 Esperando 20 segundos antes de empezar...',
             'LoopWorkflow',
           );
 
-          // Mantener contador de iteraciones
-          const iteration = data.iteration || 0;
+          const iteration = context.data.iteration || 0;
 
           return {
-            ...data,
+            ...context.data,
             iteration: iteration + 1,
-            startedAt: data.startedAt || new Date(),
+            startedAt: context.data.startedAt || new Date(),
             lastAction: 'initial-wait',
-            _workflowActive: true, // Flag para indicar que el workflow sigue activo
+            _workflowActive: true,
           };
         },
         nextStep: 'print-hello',
-        delay: 20000, // 20 segundos
+        delay: 20000,
       },
     ],
 
@@ -38,20 +37,19 @@ export const loopWorkflowDefinition: WorkflowDefinition = {
       'print-hello',
       {
         name: 'Print Hello World',
-        handler: async (data) => {
-          const message = `🌍 Hello World! (Iteración #${data.iteration})`;
-          logger.log(message, 'LoopWorkflow');
+        handler: async (context) => {
+          const message = `🌍 Hello World! (Iteración #${context.data.iteration})`;
+          context.logger.log(message, 'LoopWorkflow');
 
-          // Guardar historial de mensajes
-          const messages = data.messages || [];
+          const messages = context.data.messages || [];
           messages.push({
             message,
             timestamp: new Date(),
-            iteration: data.iteration,
+            iteration: context.data.iteration,
           });
 
           return {
-            ...data,
+            ...context.data,
             messages,
             lastAction: 'print-hello',
             lastPrint: new Date(),
@@ -66,39 +64,41 @@ export const loopWorkflowDefinition: WorkflowDefinition = {
       'wait-before-loop',
       {
         name: 'Wait Before Loop',
-        handler: async (data) => {
-          logger.log(
+        handler: async (context) => {
+          context.logger.log(
             '⏳ Esperando 20 segundos antes de repetir...',
             'LoopWorkflow',
           );
 
-          // Verificar si debemos continuar el loop
-          const maxIterations = data.maxIterations || Infinity; // Sin límite por defecto
+          const maxIterations = context.data.maxIterations || Infinity;
 
-          if (data.maxIterations && data.iteration >= maxIterations) {
-            logger.log(
+          if (
+            context.data.maxIterations &&
+            context.data.iteration >= maxIterations
+          ) {
+            context.logger.log(
               '🛑 Alcanzado el máximo de iteraciones. Terminando workflow.',
               'LoopWorkflow',
             );
             return {
-              ...data,
+              ...context.data,
               completed: true,
               completedAt: new Date(),
               lastAction: 'completed',
-              _workflowActive: false, // Marcar como inactivo
-              _workflowCompleted: true, // Marcar como realmente completado
+              _workflowActive: false,
+              _workflowCompleted: true,
             };
           }
 
           return {
-            ...data,
+            ...context.data,
             lastAction: 'wait-before-loop',
             shouldContinue: true,
             _workflowActive: true,
           };
         },
-        nextStep: 'goto-loop', // Ir al paso de decisión
-        delay: 20000, // 20 segundos
+        nextStep: 'goto-loop',
+        delay: 20000,
       },
     ],
 
@@ -106,32 +106,32 @@ export const loopWorkflowDefinition: WorkflowDefinition = {
       'goto-loop',
       {
         name: 'Go To Loop Decision',
-        handler: async (data) => {
-          logger.log('🔄 Volviendo al inicio del loop...', 'LoopWorkflow');
+        handler: async (context) => {
+          context.logger.log(
+            '🔄 Volviendo al inicio del loop...',
+            'LoopWorkflow',
+          );
 
-          // Si el workflow fue marcado para terminar, no continuar
-          if (data._workflowCompleted) {
+          if (context.data._workflowCompleted) {
             return {
-              ...data,
+              ...context.data,
               lastAction: 'completed',
               _workflowActive: false,
             };
           }
 
-          // Este paso simplemente pasa los datos al siguiente
           return {
-            ...data,
+            ...context.data,
             lastAction: 'goto-loop',
             _workflowActive: true,
           };
         },
-        nextStep: 'print-hello', // Volver a imprimir hello world (LOOP)
+        nextStep: 'print-hello',
       },
     ],
   ]),
 };
 
-// Workflow con condicionales y múltiples rutas
 export const conditionalLoopWorkflow: WorkflowDefinition = {
   id: 'conditional-loop',
   name: 'Conditional Loop Workflow',
@@ -142,14 +142,13 @@ export const conditionalLoopWorkflow: WorkflowDefinition = {
       'check-condition',
       {
         name: 'Check Condition',
-        handler: async (data) => {
-          const counter = data.counter || 0;
-          logger.log(
+        handler: async (context) => {
+          const counter = context.data.counter || 0;
+          context.logger.log(
             `🔍 Verificando condición. Counter: ${counter}`,
             'ConditionalLoop',
           );
 
-          // Decidir qué camino tomar basado en el contador
           let nextPath: string;
           if (counter === 0) {
             nextPath = 'path-a';
@@ -160,7 +159,7 @@ export const conditionalLoopWorkflow: WorkflowDefinition = {
           }
 
           return {
-            ...data,
+            ...context.data,
             counter: counter + 1,
             selectedPath: nextPath,
             lastCheck: new Date(),
@@ -175,11 +174,14 @@ export const conditionalLoopWorkflow: WorkflowDefinition = {
       'router',
       {
         name: 'Route Decision',
-        handler: async (data) => {
-          logger.log(`🚦 Enrutando a: ${data.selectedPath}`, 'ConditionalLoop');
+        handler: async (context) => {
+          context.logger.log(
+            `🚦 Enrutando a: ${context.data.selectedPath}`,
+            'ConditionalLoop',
+          );
 
           return {
-            ...data,
+            ...context.data,
             _workflowActive: true,
           };
         },
@@ -191,7 +193,7 @@ export const conditionalLoopWorkflow: WorkflowDefinition = {
       'execute-action',
       {
         name: 'Execute Action',
-        handler: async (data) => {
+        handler: async (context) => {
           const actions = {
             'path-a': '🅰️ Ejecutando acción A - Proceso inicial',
             'path-b': '🅱️ Ejecutando acción B - Proceso par',
@@ -199,28 +201,27 @@ export const conditionalLoopWorkflow: WorkflowDefinition = {
           };
 
           const action =
-            actions[data.selectedPath as keyof typeof actions] ||
+            actions[context.data.selectedPath as keyof typeof actions] ||
             'Acción desconocida';
-          logger.log(action, 'ConditionalLoop');
+          context.logger.log(action, 'ConditionalLoop');
 
-          // Guardar historial de acciones
-          const actionHistory = data.actionHistory || [];
+          const actionHistory = context.data.actionHistory || [];
           actionHistory.push({
-            path: data.selectedPath,
+            path: context.data.selectedPath,
             action,
             timestamp: new Date(),
-            counter: data.counter,
+            counter: context.data.counter,
           });
 
           return {
-            ...data,
+            ...context.data,
             actionHistory,
             lastAction: action,
             _workflowActive: true,
           };
         },
         nextStep: 'wait-and-decide',
-        delay: 5000, // 5 segundos entre acciones
+        delay: 5000,
       },
     ],
 
@@ -228,20 +229,19 @@ export const conditionalLoopWorkflow: WorkflowDefinition = {
       'wait-and-decide',
       {
         name: 'Wait and Decide',
-        handler: async (data) => {
-          logger.log(
+        handler: async (context) => {
+          context.logger.log(
             '⏰ Esperando antes de decidir si continuar...',
             'ConditionalLoop',
           );
 
-          // Terminar después de 5 iteraciones
-          if (data.counter >= 5) {
-            logger.log(
+          if (context.data.counter >= 5) {
+            context.logger.log(
               '✅ Workflow completado después de 5 iteraciones',
               'ConditionalLoop',
             );
             return {
-              ...data,
+              ...context.data,
               completed: true,
               completedAt: new Date(),
               _workflowActive: false,
@@ -250,12 +250,12 @@ export const conditionalLoopWorkflow: WorkflowDefinition = {
           }
 
           return {
-            ...data,
+            ...context.data,
             _workflowActive: true,
           };
         },
-        nextStep: 'check-condition', // Volver al inicio (LOOP)
-        delay: 10000, // 10 segundos
+        nextStep: 'check-condition',
+        delay: 10000,
       },
     ],
   ]),

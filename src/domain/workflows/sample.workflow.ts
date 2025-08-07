@@ -1,11 +1,22 @@
-import { logger } from '../../common/services/logger.service';
+// src/domain/workflows/sample.workflow.ts
+
+import { IWorkflowLogger } from '../interfaces/workflow-logger.interface';
+
+export interface WorkflowStepContext {
+  logger: IWorkflowLogger;
+  executionId: string;
+  workflowId: string;
+  stepId: string;
+  attempt: number;
+  data: any;
+}
 
 export interface WorkflowStep {
   name: string;
-  handler: (data: any) => Promise<any>;
+  handler: (context: WorkflowStepContext) => Promise<any>;
   nextStep?: string;
   delay?: number;
-  timeout?: number; // Timeout en milisegundos para el paso
+  timeout?: number;
 }
 
 export interface WorkflowDefinition {
@@ -16,7 +27,6 @@ export interface WorkflowDefinition {
   startStep: string;
 }
 
-// Clase base para los pasos del workflow
 export abstract class StepBody {
   abstract run(context: StepExecutionContext): Promise<ExecutionResult>;
 }
@@ -31,12 +41,8 @@ export class ExecutionResult {
   }
 }
 
-// Implementación de los pasos
 export class ProcessDataStep extends StepBody {
   public run(context: StepExecutionContext): Promise<ExecutionResult> {
-    logger.log('Procesando datos', 'ProcessDataStep');
-
-    // Simulación de procesamiento
     const processedData = {
       ...context.item,
       processed: true,
@@ -51,9 +57,6 @@ export class ProcessDataStep extends StepBody {
 
 export class ValidateDataStep extends StepBody {
   public run(context: StepExecutionContext): Promise<ExecutionResult> {
-    logger.log('Validando datos', 'ValidateDataStep');
-
-    // Validación simple
     if (!context.item || !context.item.processed) {
       throw new Error('Datos inválidos: faltan campos requeridos');
     }
@@ -64,14 +67,10 @@ export class ValidateDataStep extends StepBody {
 
 export class SendNotificationStep extends StepBody {
   public run(_context: StepExecutionContext): Promise<ExecutionResult> {
-    logger.log('Enviando notificación', 'SendNotificationStep');
-    logger.log('Notificación enviada exitosamente', 'SendNotificationStep');
-
     return Promise.resolve(ExecutionResult.next());
   }
 }
 
-// Definiciones de workflows
 export const sampleWorkflowDefinition: WorkflowDefinition = {
   id: 'sample-workflow',
   name: 'Sample Workflow',
@@ -82,9 +81,9 @@ export const sampleWorkflowDefinition: WorkflowDefinition = {
       'process-data',
       {
         name: 'Process Data',
-        handler: async (data) => {
-          logger.log('Procesando datos en workflow', 'SampleWorkflow');
-          return { ...data, processed: true, timestamp: new Date() };
+        handler: async (context) => {
+          context.logger.log('Procesando datos en workflow', 'SampleWorkflow');
+          return { ...context.data, processed: true, timestamp: new Date() };
         },
         nextStep: 'validate-data',
       },
@@ -93,12 +92,12 @@ export const sampleWorkflowDefinition: WorkflowDefinition = {
       'validate-data',
       {
         name: 'Validate Data',
-        handler: async (data) => {
-          logger.log('Validando datos en workflow', 'SampleWorkflow');
-          if (!data.processed) {
+        handler: async (context) => {
+          context.logger.log('Validando datos en workflow', 'SampleWorkflow');
+          if (!context.data.processed) {
             throw new Error('Datos inválidos');
           }
-          return data;
+          return context.data;
         },
         nextStep: 'send-notification',
         delay: 2000,
@@ -108,9 +107,12 @@ export const sampleWorkflowDefinition: WorkflowDefinition = {
       'send-notification',
       {
         name: 'Send Notification',
-        handler: async (data) => {
-          logger.log('Enviando notificación en workflow', 'SampleWorkflow');
-          return { ...data, notified: true };
+        handler: async (context) => {
+          context.logger.log(
+            'Enviando notificación en workflow',
+            'SampleWorkflow',
+          );
+          return { ...context.data, notified: true };
         },
       },
     ],
@@ -127,15 +129,18 @@ export const errorHandlingWorkflowDefinition: WorkflowDefinition = {
       'process-with-retry',
       {
         name: 'Process with Retry',
-        handler: async (data) => {
-          logger.log('Procesando con reintentos', 'ErrorHandlingWorkflow');
-          const retryCount = data.retryCount || 0;
+        handler: async (context) => {
+          context.logger.log(
+            'Procesando con reintentos',
+            'ErrorHandlingWorkflow',
+          );
+          const retryCount = context.data.retryCount || 0;
 
           if (retryCount < 2 && Math.random() > 0.5) {
             throw new Error('Error simulado');
           }
 
-          return { ...data, processed: true };
+          return { ...context.data, processed: true };
         },
         nextStep: 'complete',
       },
@@ -144,9 +149,9 @@ export const errorHandlingWorkflowDefinition: WorkflowDefinition = {
       'complete',
       {
         name: 'Complete',
-        handler: async (data) => {
-          logger.log('Workflow completado', 'ErrorHandlingWorkflow');
-          return { ...data, completed: true };
+        handler: async (context) => {
+          context.logger.log('Workflow completado', 'ErrorHandlingWorkflow');
+          return { ...context.data, completed: true };
         },
       },
     ],

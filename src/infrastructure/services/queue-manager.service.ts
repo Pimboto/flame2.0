@@ -1,9 +1,9 @@
 // src/infrastructure/services/queue-manager.service.ts
-// SERVICIO DE GESTIÓN DE COLAS - Maneja las colas de BullMQ
 
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, Inject } from '@nestjs/common';
 import { Queue, QueueEvents } from 'bullmq';
-import { RedisConnectionService } from './redis-connection.service';
+import { IQueueManager } from '../../domain/interfaces/queue-manager.interface';
+import { IRedisConnection } from '../../domain/interfaces/redis-connection.interface';
 
 export interface QueueConfig {
   attempts?: number;
@@ -15,7 +15,7 @@ export interface QueueConfig {
 }
 
 @Injectable()
-export class QueueManagerService implements OnModuleDestroy {
+export class QueueManagerService implements OnModuleDestroy, IQueueManager {
   private readonly logger = new Logger(QueueManagerService.name);
   private queues: Map<string, Queue> = new Map();
   private queueEvents: Map<string, QueueEvents> = new Map();
@@ -23,13 +23,16 @@ export class QueueManagerService implements OnModuleDestroy {
   private readonly defaultConfig: QueueConfig = {
     attempts: 3,
     backoffDelay: 2000,
-    removeOnCompleteAge: 300, // 5 minutes
+    removeOnCompleteAge: 300,
     removeOnCompleteCount: 10,
-    removeOnFailAge: 3600, // 1 hour
+    removeOnFailAge: 3600,
     removeOnFailCount: 50,
   };
 
-  constructor(private readonly redisConnection: RedisConnectionService) {}
+  constructor(
+    @Inject('IRedisConnection')
+    private readonly redisConnection: IRedisConnection,
+  ) {}
 
   async onModuleDestroy() {
     await this.closeAll();
@@ -75,7 +78,6 @@ export class QueueManagerService implements OnModuleDestroy {
       this.queues.set(name, queue);
       this.logger.log(`Queue created: ${name}`);
 
-      // Create queue events for monitoring
       const queueEvents = new QueueEvents(name, {
         connection: connection.duplicate(),
       });
@@ -106,7 +108,6 @@ export class QueueManagerService implements OnModuleDestroy {
       return await queue.getJobCounts();
     }
 
-    // Get stats for all queues
     const stats: any = {};
     for (const [queueName, queue] of this.queues) {
       try {
@@ -175,7 +176,6 @@ export class QueueManagerService implements OnModuleDestroy {
   async closeAll(): Promise<void> {
     this.logger.log('Closing all queues...');
 
-    // Close all queue events first
     const eventPromises = Array.from(this.queueEvents.values()).map((events) =>
       events
         .close()
@@ -184,7 +184,6 @@ export class QueueManagerService implements OnModuleDestroy {
     await Promise.all(eventPromises);
     this.queueEvents.clear();
 
-    // Close all queues
     const queuePromises = Array.from(this.queues.values()).map((queue) =>
       queue
         .close()

@@ -1,204 +1,114 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
-import { WorkflowEngineService } from '../../infrastructure/workflow-engine.service';
+// src/application/services/workflow.service.ts
+
+import { Injectable, Logger } from '@nestjs/common';
 import { ExecuteWorkflowDto } from '../../presentation/dto/execute-workflow.dto';
+import { ExecuteWorkflowCommand } from '../commands/execute-workflow.command';
+import { TerminateWorkflowCommand } from '../commands/terminate-workflow.command';
+import { GetWorkflowStatusQuery } from '../queries/get-workflow-status.query';
+import { GetWorkflowListQuery } from '../queries/get-workflow-list.query';
+import { ExecuteWorkflowUseCase } from '../use-cases/execute-workflow/execute-workflow.use-case';
+import { GetWorkflowStatusUseCase } from '../use-cases/get-workflow-status/get-workflow-status.use-case';
+import { TerminateWorkflowUseCase } from '../use-cases/terminate-workflow/terminate-workflow.use-case';
+import { SuspendWorkflowUseCase } from '../use-cases/suspend-workflow/suspend-workflow.use-case';
+import { ResumeWorkflowUseCase } from '../use-cases/resume-workflow/resume-workflow.use-case';
+import { GetWorkflowListUseCase } from '../use-cases/get-workflow-list/get-workflow-list.use-case';
+import { GetExecutionHistoryUseCase } from '../use-cases/get-execution-history/get-execution-history.use-case';
+import { WorkflowEngineService } from '../../infrastructure/workflow-engine.service';
 
 @Injectable()
 export class WorkflowService {
   private readonly logger = new Logger(WorkflowService.name);
 
-  constructor(private readonly workflowEngine: WorkflowEngineService) {}
+  constructor(
+    private readonly executeWorkflowUseCase: ExecuteWorkflowUseCase,
+    private readonly getWorkflowStatusUseCase: GetWorkflowStatusUseCase,
+    private readonly terminateWorkflowUseCase: TerminateWorkflowUseCase,
+    private readonly suspendWorkflowUseCase: SuspendWorkflowUseCase,
+    private readonly resumeWorkflowUseCase: ResumeWorkflowUseCase,
+    private readonly getWorkflowListUseCase: GetWorkflowListUseCase,
+    private readonly getExecutionHistoryUseCase: GetExecutionHistoryUseCase,
+    private readonly workflowEngine: WorkflowEngineService,
+  ) {}
 
   async executeWorkflow(dto: ExecuteWorkflowDto): Promise<any> {
-    try {
-      this.logger.log(`Ejecutando workflow: ${dto.workflowId}`);
+    const command = new ExecuteWorkflowCommand(dto.workflowId, dto.data);
 
-      // Validar que el workflow existe
-      if (!this.isValidWorkflowId(dto.workflowId)) {
-        throw new BadRequestException(
-          `Workflow no encontrado: ${dto.workflowId}`,
-        );
-      }
+    const result = await this.executeWorkflowUseCase.execute(command);
 
-      // Ejecutar el workflow
-      const instanceId = await this.workflowEngine.startWorkflow(
-        dto.workflowId,
-        dto.data || {},
-      );
-
-      return {
-        success: true,
-        instanceId,
-        message: 'Workflow iniciado exitosamente',
-      };
-    } catch (error) {
-      this.logger.error('Error ejecutando workflow:', error);
-      throw error;
-    }
-  }
-
-  async getWorkflowStatus(instanceId: string): Promise<any> {
-    try {
-      const status = await this.workflowEngine.getWorkflowStatus(instanceId);
-
-      if (!status) {
-        throw new NotFoundException(
-          `Instancia de workflow no encontrada: ${instanceId}`,
-        );
-      }
-
-      return status; // Devolver todo el estado detallado
-    } catch (error) {
-      this.logger.error(
-        `Error obteniendo estado del workflow ${instanceId}:`,
-        error,
-      );
-      throw error;
-    }
-  }
-
-  async suspendWorkflow(instanceId: string): Promise<any> {
-    try {
-      await this.workflowEngine.suspendWorkflow(instanceId);
-
-      return {
-        success: true,
-        message: 'Workflow suspendido exitosamente',
-      };
-    } catch (error) {
-      this.logger.error(`Error suspendiendo workflow ${instanceId}:`, error);
-      throw error;
-    }
-  }
-
-  async resumeWorkflow(instanceId: string): Promise<any> {
-    try {
-      await this.workflowEngine.resumeWorkflow(instanceId);
-
-      return {
-        success: true,
-        message: 'Workflow reanudado exitosamente',
-      };
-    } catch (error) {
-      this.logger.error(`Error reanudando workflow ${instanceId}:`, error);
-      throw error;
-    }
-  }
-
-  async terminateWorkflow(instanceId: string): Promise<any> {
-    try {
-      await this.workflowEngine.terminateWorkflow(instanceId);
-
-      return {
-        success: true,
-        message: 'Workflow terminado exitosamente',
-      };
-    } catch (error) {
-      this.logger.error(`Error terminando workflow ${instanceId}:`, error);
-      throw error;
-    }
-  }
-
-  async testWorkflow(workflowId: string, testData: any): Promise<any> {
-    try {
-      this.logger.log(`Testeando workflow: ${workflowId}`);
-
-      // Validar que el workflow existe
-      if (!this.isValidWorkflowId(workflowId)) {
-        throw new BadRequestException(`Workflow no encontrado: ${workflowId}`);
-      }
-
-      // Ejecutar test
-      const result = await this.workflowEngine.testWorkflow(
-        workflowId,
-        testData,
-      );
-
-      return {
-        success: true,
-        ...result,
-        message: 'Test de workflow completado exitosamente',
-      };
-    } catch (error) {
-      this.logger.error(`Error testeando workflow ${workflowId}:`, error);
-      throw error;
-    }
-  }
-
-  async listAvailableWorkflows(): Promise<any> {
-    // Por ahora retornamos los workflows hardcodeados
-    // En el futuro esto podría venir de una base de datos
     return {
-      workflows: [
-        {
-          id: 'safe-automation-workflow',
-          name: 'Safe Automation Workflow',
-          description:
-            'Workflow seguro con múltiples puntos de control y detención automática',
-          version: 1,
-        },
-        {
-          id: 'import-accounts-workflow',
-          name: 'Import Tinder Accounts Workflow',
-          description:
-            'Workflow para importar cuentas de Tinder desde la API externa',
-          version: 1,
-        },
-      ],
+      success: true,
+      instanceId: result.executionId,
+      message: result.message,
     };
   }
 
+  async getWorkflowStatus(instanceId: string): Promise<any> {
+    const query = new GetWorkflowStatusQuery(instanceId, true);
+    return await this.getWorkflowStatusUseCase.execute(query);
+  }
+
+  async suspendWorkflow(instanceId: string): Promise<any> {
+    await this.suspendWorkflowUseCase.execute(instanceId);
+
+    return {
+      success: true,
+      message: 'Workflow suspended successfully',
+    };
+  }
+
+  async resumeWorkflow(instanceId: string): Promise<any> {
+    await this.resumeWorkflowUseCase.execute(instanceId);
+
+    return {
+      success: true,
+      message: 'Workflow resumed successfully',
+    };
+  }
+
+  async terminateWorkflow(instanceId: string): Promise<any> {
+    const command = new TerminateWorkflowCommand(instanceId);
+    await this.terminateWorkflowUseCase.execute(command);
+
+    return {
+      success: true,
+      message: 'Workflow terminated successfully',
+    };
+  }
+
+  async testWorkflow(workflowId: string, testData: any): Promise<any> {
+    this.logger.log(`Testing workflow: ${workflowId}`);
+    const result = await this.workflowEngine.testWorkflow(workflowId, testData);
+
+    return {
+      success: true,
+      ...result,
+      message: 'Workflow test completed successfully',
+    };
+  }
+
+  async listAvailableWorkflows(): Promise<any> {
+    const query = new GetWorkflowListQuery(true);
+    return await this.getWorkflowListUseCase.execute(query);
+  }
+
   async getExecutionHistory(): Promise<any> {
-    try {
-      return await this.workflowEngine.getExecutionHistory();
-    } catch (error) {
-      this.logger.error('Error obteniendo historial de ejecuciones:', error);
-      throw error;
-    }
+    return await this.getExecutionHistoryUseCase.execute();
   }
 
   async getQueueStats(): Promise<any> {
-    try {
-      return await this.workflowEngine.getQueueStats();
-    } catch (error) {
-      this.logger.error('Error obteniendo estadísticas de colas:', error);
-      throw error;
-    }
+    return await this.workflowEngine.getQueueStats();
   }
 
   async getCapacityInfo(): Promise<any> {
-    try {
-      return this.workflowEngine.getCapacityInfo();
-    } catch (error) {
-      this.logger.error('Error obteniendo información de capacidad:', error);
-      throw error;
-    }
+    return this.workflowEngine.getCapacityInfo();
   }
 
   async forceCleanup(): Promise<any> {
-    try {
-      await this.workflowEngine.forceCleanup();
-      return {
-        success: true,
-        message: 'Limpieza ejecutada exitosamente',
-        timestamp: new Date(),
-      };
-    } catch (error) {
-      this.logger.error('Error ejecutando limpieza:', error);
-      throw error;
-    }
-  }
-
-  private isValidWorkflowId(workflowId: string): boolean {
-    // Por ahora validamos contra una lista hardcodeada
-    const validWorkflows = [
-      'safe-automation-workflow',
-      'import-accounts-workflow',
-    ];
-    return validWorkflows.includes(workflowId);
+    await this.workflowEngine.forceCleanup();
+    return {
+      success: true,
+      message: 'Cleanup executed successfully',
+      timestamp: new Date(),
+    };
   }
 }

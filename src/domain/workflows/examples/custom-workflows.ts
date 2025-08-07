@@ -1,7 +1,7 @@
-import { WorkflowDefinition } from '../sample.workflow';
-import { logger } from '../../../common/services/logger.service';
+// src/domain/workflows/examples/custom-workflows.ts
 
-// Ejemplo: Workflow de procesamiento de pedidos
+import { WorkflowDefinition } from '../sample.workflow';
+
 export const orderProcessingWorkflow: WorkflowDefinition = {
   id: 'order-processing',
   name: 'Order Processing Workflow',
@@ -12,16 +12,15 @@ export const orderProcessingWorkflow: WorkflowDefinition = {
       'validate-order',
       {
         name: 'Validate Order',
-        handler: async (data) => {
-          logger.log('Validando pedido', 'OrderWorkflow');
+        handler: async (context) => {
+          context.logger.log('Validando pedido', 'OrderWorkflow');
 
-          // Validar que tenga los campos necesarios
-          if (!data.items || !data.customer) {
+          if (!context.data.items || !context.data.customer) {
             throw new Error('Pedido inválido');
           }
 
           return {
-            ...data,
+            ...context.data,
             validated: true,
             validatedAt: new Date(),
           };
@@ -34,18 +33,18 @@ export const orderProcessingWorkflow: WorkflowDefinition = {
       'calculate-total',
       {
         name: 'Calculate Total',
-        handler: async (data) => {
-          logger.log('Calculando total', 'OrderWorkflow');
+        handler: async (context) => {
+          context.logger.log('Calculando total', 'OrderWorkflow');
 
-          const total = data.items.reduce(
+          const total = context.data.items.reduce(
             (sum: number, item: any) => sum + item.price * item.quantity,
             0,
           );
 
           return {
-            ...data,
+            ...context.data,
             total,
-            tax: total * 0.16, // 16% IVA
+            tax: total * 0.16,
             grandTotal: total * 1.16,
           };
         },
@@ -57,21 +56,20 @@ export const orderProcessingWorkflow: WorkflowDefinition = {
       'process-payment',
       {
         name: 'Process Payment',
-        handler: async (data) => {
-          logger.log('Procesando pago', 'OrderWorkflow');
+        handler: async (context) => {
+          context.logger.log('Procesando pago', 'OrderWorkflow');
 
-          // Aquí iría la integración con pasarela de pagos
-          await new Promise((resolve) => setTimeout(resolve, 2000)); // Simular
+          await new Promise((resolve) => setTimeout(resolve, 2000));
 
           return {
-            ...data,
+            ...context.data,
             paid: true,
             paymentId: `PAY-${Date.now()}`,
             paidAt: new Date(),
           };
         },
         nextStep: 'send-confirmation',
-        delay: 1000, // Esperar 1 segundo antes del siguiente paso
+        delay: 1000,
       },
     ],
 
@@ -79,14 +77,15 @@ export const orderProcessingWorkflow: WorkflowDefinition = {
       'send-confirmation',
       {
         name: 'Send Confirmation',
-        handler: async (data) => {
-          logger.log('Enviando confirmación', 'OrderWorkflow');
-
-          // Aquí iría el envío de email
-          logger.log(`Email enviado a ${data.customer.email}`, 'OrderWorkflow');
+        handler: async (context) => {
+          context.logger.log('Enviando confirmación', 'OrderWorkflow');
+          context.logger.log(
+            `Email enviado a ${context.data.customer.email}`,
+            'OrderWorkflow',
+          );
 
           return {
-            ...data,
+            ...context.data,
             confirmed: true,
             orderId: `ORD-${Date.now()}`,
             completedAt: new Date(),
@@ -97,7 +96,6 @@ export const orderProcessingWorkflow: WorkflowDefinition = {
   ]),
 };
 
-// Ejemplo: Workflow con decisiones condicionales
 export const conditionalWorkflow: WorkflowDefinition = {
   id: 'conditional-workflow',
   name: 'Conditional Workflow Example',
@@ -108,25 +106,23 @@ export const conditionalWorkflow: WorkflowDefinition = {
       'check-condition',
       {
         name: 'Check Condition',
-        handler: async (data) => {
-          logger.log('Verificando condición', 'ConditionalWorkflow');
+        handler: async (context) => {
+          context.logger.log('Verificando condición', 'ConditionalWorkflow');
 
-          // Decisión basada en los datos
-          if (data.amount > 1000) {
+          if (context.data.amount > 1000) {
             return {
-              ...data,
+              ...context.data,
               requiresApproval: true,
               nextStep: 'manager-approval',
             };
           } else {
             return {
-              ...data,
+              ...context.data,
               requiresApproval: false,
               nextStep: 'auto-approve',
             };
           }
         },
-        // El siguiente paso se determina dinámicamente
         nextStep: undefined,
       },
     ],
@@ -135,14 +131,16 @@ export const conditionalWorkflow: WorkflowDefinition = {
       'manager-approval',
       {
         name: 'Manager Approval',
-        handler: async (data) => {
-          logger.log('Esperando aprobación del gerente', 'ConditionalWorkflow');
+        handler: async (context) => {
+          context.logger.log(
+            'Esperando aprobación del gerente',
+            'ConditionalWorkflow',
+          );
 
-          // Simular aprobación
           await new Promise((resolve) => setTimeout(resolve, 3000));
 
           return {
-            ...data,
+            ...context.data,
             approved: true,
             approvedBy: 'manager@company.com',
           };
@@ -155,11 +153,11 @@ export const conditionalWorkflow: WorkflowDefinition = {
       'auto-approve',
       {
         name: 'Auto Approve',
-        handler: async (data) => {
-          logger.log('Aprobación automática', 'ConditionalWorkflow');
+        handler: async (context) => {
+          context.logger.log('Aprobación automática', 'ConditionalWorkflow');
 
           return {
-            ...data,
+            ...context.data,
             approved: true,
             approvedBy: 'system',
           };
@@ -172,11 +170,11 @@ export const conditionalWorkflow: WorkflowDefinition = {
       'process',
       {
         name: 'Process',
-        handler: async (data) => {
-          logger.log('Procesando...', 'ConditionalWorkflow');
+        handler: async (context) => {
+          context.logger.log('Procesando...', 'ConditionalWorkflow');
 
           return {
-            ...data,
+            ...context.data,
             processed: true,
             processedAt: new Date(),
           };

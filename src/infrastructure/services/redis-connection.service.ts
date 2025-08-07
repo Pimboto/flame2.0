@@ -1,12 +1,14 @@
 // src/infrastructure/services/redis-connection.service.ts
-// SERVICIO DE CONEXIÓN REDIS - Maneja el pool de conexiones
 
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import IORedis from 'ioredis';
 import { ConfigService } from '../../common/services/config.service';
+import { IRedisConnection } from '../../domain/interfaces/redis-connection.interface';
 
 @Injectable()
-export class RedisConnectionService implements OnModuleDestroy {
+export class RedisConnectionService
+  implements OnModuleDestroy, IRedisConnection
+{
   private readonly logger = new Logger(RedisConnectionService.name);
   private connectionPool: Map<string, IORedis> = new Map();
   private isAvailable = false;
@@ -22,12 +24,10 @@ export class RedisConnectionService implements OnModuleDestroy {
   }
 
   async getConnection(name: string = 'default'): Promise<IORedis | null> {
-    // Si ya existe la conexión, retornarla
     if (this.connectionPool.has(name)) {
       return this.connectionPool.get(name)!;
     }
 
-    // Crear nueva conexión
     try {
       const connection = await this.createConnection(name);
       if (connection) {
@@ -70,7 +70,6 @@ export class RedisConnectionService implements OnModuleDestroy {
         },
       });
 
-      // Event handlers
       connection.on('connect', () => {
         this.logger.debug(`Redis connection ${name} connecting...`);
       });
@@ -88,10 +87,8 @@ export class RedisConnectionService implements OnModuleDestroy {
         this.logger.warn(`Redis connection ${name} closed`);
       });
 
-      // Connect
       await connection.connect();
 
-      // Test connection
       const pingResult = await connection.ping();
       this.logger.debug(`Redis ${name} ping: ${pingResult}`);
 

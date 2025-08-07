@@ -1,3 +1,6 @@
+// src/domain/interfaces/account.repository.interface.ts
+// CONSOLIDADO - Esta es la única versión que debe existir
+
 import { Account } from '../entities/account.entity';
 
 export interface IAccountRepository {
@@ -10,4 +13,6 @@ export interface IAccountRepository {
   findByStatus(status: string): Promise<Account[]>;
   update(id: string, updateData: Partial<Account>): Promise<void>;
   delete(id: string): Promise<void>;
+  count(): Promise<number>;
+  exists(id: string): Promise<boolean>;
 }
