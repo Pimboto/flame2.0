@@ -22,7 +22,7 @@ export interface ImportAccountsData {
   importedAccounts?: any[];
 }
 
-export function createImportAccountsWorkflowDefinition(): WorkflowDefinition {
+export function createImportAccountsWorkflow(): WorkflowDefinition {
   const startImportStep: WorkflowStep = {
     name: 'Start Import',
     timeout: 60000,
@@ -170,14 +170,4 @@ export function createImportAccountsWorkflowDefinition(): WorkflowDefinition {
   };
 }
 
-// For backwards compatibility
-export function createImportAccountsWorkflow(
-  _tinderApiService?: any,
-  _accountRepository?: any,
-): WorkflowDefinition {
-  // Return the pure workflow definition
-  // The services will be injected at the application layer
-  return createImportAccountsWorkflowDefinition();
-}
-
-export const importAccountsWorkflow = createImportAccountsWorkflow;
+export const importAccountsWorkflow = createImportAccountsWorkflow();

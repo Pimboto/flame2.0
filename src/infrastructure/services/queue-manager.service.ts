@@ -1,4 +1,5 @@
 // src/infrastructure/services/queue-manager.service.ts
+// FIX para el error de duplicación de colas
 
 import { Injectable, Logger, OnModuleDestroy, Inject } from '@nestjs/common';
 import { Queue, QueueEvents } from 'bullmq';
@@ -39,17 +40,22 @@ export class QueueManagerService implements OnModuleDestroy, IQueueManager {
   }
 
   async createQueue(name: string, config?: QueueConfig): Promise<Queue | null> {
+    // Check if queue already exists
+    if (this.queues.has(name)) {
+      this.logger.debug(
+        `Queue ${name} already exists, returning existing instance`,
+      );
+      return this.queues.get(name)!;
+    }
+
     if (!this.redisConnection.isRedisAvailable) {
       this.logger.warn(`Cannot create queue ${name}: Redis not available`);
       return null;
     }
 
-    if (this.queues.has(name)) {
-      return this.queues.get(name)!;
-    }
-
     const connection = await this.redisConnection.getConnection('queue');
     if (!connection) {
+      this.logger.error(`Cannot create queue ${name}: No Redis connection`);
       return null;
     }
 
@@ -78,15 +84,26 @@ export class QueueManagerService implements OnModuleDestroy, IQueueManager {
       this.queues.set(name, queue);
       this.logger.log(`Queue created: ${name}`);
 
-      const queueEvents = new QueueEvents(name, {
-        connection: connection.duplicate(),
-      });
-
-      this.queueEvents.set(name, queueEvents);
+      // Create queue events listener
+      try {
+        const queueEvents = new QueueEvents(name, {
+          connection: connection.duplicate(),
+        });
+        this.queueEvents.set(name, queueEvents);
+        this.logger.debug(`Queue events created for: ${name}`);
+      } catch (eventsError) {
+        this.logger.warn(
+          `Failed to create queue events for ${name}:`,
+          eventsError,
+        );
+        // Queue can work without events listener
+      }
 
       return queue;
     } catch (error) {
       this.logger.error(`Failed to create queue ${name}:`, error);
+      // Remove from map if creation failed
+      this.queues.delete(name);
       return null;
     }
   }
@@ -105,7 +122,12 @@ export class QueueManagerService implements OnModuleDestroy, IQueueManager {
       if (!queue) {
         return null;
       }
-      return await queue.getJobCounts();
+      try {
+        return await queue.getJobCounts();
+      } catch (error) {
+        this.logger.error(`Failed to get stats for queue ${name}:`, error);
+        return { error: 'Failed to get stats' };
+      }
     }
 
     const stats: any = {};
@@ -113,6 +135,7 @@ export class QueueManagerService implements OnModuleDestroy, IQueueManager {
       try {
         stats[queueName] = await queue.getJobCounts();
       } catch (error) {
+        this.logger.error(`Failed to get stats for queue ${queueName}:`, error);
         stats[queueName] = { error: 'Failed to get stats' };
       }
     }
@@ -162,32 +185,52 @@ export class QueueManagerService implements OnModuleDestroy, IQueueManager {
     const events = this.queueEvents.get(name);
 
     if (events) {
-      await events.close();
-      this.queueEvents.delete(name);
+      try {
+        await events.close();
+        this.queueEvents.delete(name);
+      } catch (error) {
+        this.logger.error(`Error closing queue events for ${name}:`, error);
+      }
     }
 
     if (queue) {
-      await queue.close();
-      this.queues.delete(name);
-      this.logger.log(`Queue ${name} closed`);
+      try {
+        await queue.close();
+        this.queues.delete(name);
+        this.logger.log(`Queue ${name} closed`);
+      } catch (error) {
+        this.logger.error(`Error closing queue ${name}:`, error);
+      }
     }
   }
 
   async closeAll(): Promise<void> {
     this.logger.log('Closing all queues...');
 
-    const eventPromises = Array.from(this.queueEvents.values()).map((events) =>
-      events
-        .close()
-        .catch((err) => this.logger.error('Error closing queue events:', err)),
+    // Close events first
+    const eventPromises = Array.from(this.queueEvents.entries()).map(
+      async ([name, events]) => {
+        try {
+          await events.close();
+          this.logger.debug(`Queue events closed: ${name}`);
+        } catch (err) {
+          this.logger.error(`Error closing queue events for ${name}:`, err);
+        }
+      },
     );
     await Promise.all(eventPromises);
     this.queueEvents.clear();
 
-    const queuePromises = Array.from(this.queues.values()).map((queue) =>
-      queue
-        .close()
-        .catch((err) => this.logger.error('Error closing queue:', err)),
+    // Then close queues
+    const queuePromises = Array.from(this.queues.entries()).map(
+      async ([name, queue]) => {
+        try {
+          await queue.close();
+          this.logger.debug(`Queue closed: ${name}`);
+        } catch (err) {
+          this.logger.error(`Error closing queue ${name}:`, err);
+        }
+      },
     );
     await Promise.all(queuePromises);
     this.queues.clear();
@@ -204,6 +247,11 @@ export class QueueManagerService implements OnModuleDestroy, IQueueManager {
     if (!queue) {
       return 0;
     }
-    return await queue.count();
+    try {
+      return await queue.count();
+    } catch (error) {
+      this.logger.error(`Failed to get size for queue ${name}:`, error);
+      return 0;
+    }
   }
 }

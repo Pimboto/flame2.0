@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { WorkflowExecution } from '../domain/entities/workflow-execution';
 import { safeAutomationWorkflow } from '../domain/workflows/examples/safe-automation-workflow';
-import { createImportAccountsWorkflowDefinition } from '../domain/workflows/import-accounts-workflow';
+import { createImportAccountsWorkflow } from '../domain/workflows/import-accounts-workflow'; // CORREGIDO
 import { IWorkflowExecutor } from '../domain/interfaces/workflow-executor.interface';
 import { IWorkflowWorker } from '../domain/interfaces/workflow-worker.interface';
 import { IWorkflowMonitor } from '../domain/interfaces/workflow-monitor.interface';
@@ -88,9 +88,7 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
   private registerWorkflows(): void {
     // Register pure workflow definitions
     this.executorService.registerWorkflow(safeAutomationWorkflow);
-    this.executorService.registerWorkflow(
-      createImportAccountsWorkflowDefinition(),
-    );
+    this.executorService.registerWorkflow(createImportAccountsWorkflow()); // CORREGIDO - llamar la función
 
     this.logger.log('Workflows registered');
   }
@@ -119,6 +117,8 @@ export class WorkflowEngineService implements OnModuleInit, OnModuleDestroy {
       );
     }
   }
+
+  // ... resto del código sin cambios ...
 
   private async stopWorkflowEngine() {
     this.logger.log('Stopping workflow engine...');
